@@ -1,12 +1,9 @@
-setuptools>=65.0.0
-wheel>=0.37.0
-flask==2.3.3
+flask==3.0.0
 gunicorn==21.2.0
-opencv-python-headless==4.8.0.76
-numpy==1.24.3
-Pillow==10.0.1
-torch==2.0.1+cpu --extra-index-url https://download.pytorch.org/whl/cpu
-torchvision==0.15.2+cpu --extra-index-url https://download.pytorch.org/whl/cpu
-ultralytics==8.0.196
-easyocr==1.7.0
-scipy==1.11.3
+opencv-python-headless
+numpy
+Pillow
+torch --index-url https://download.pytorch.org/whl/cpu
+torchvision --index-url https://download.pytorch.org/whl/cpu
+ultralytics
+easyocr

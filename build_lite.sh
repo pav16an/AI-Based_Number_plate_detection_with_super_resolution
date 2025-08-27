@@ -4,8 +4,10 @@
 set -o errexit
 
 # Install Python dependencies
-pip install --upgrade pip setuptools wheel
-pip install -r requirements_deploy.txt
+export SETUPTOOLS_USE_DISTUTILS=stdlib
+pip install --upgrade pip
+pip install setuptools wheel
+pip install --no-cache-dir -r requirements_deploy.txt
 
 # Create necessary directories
 mkdir -p uploads
