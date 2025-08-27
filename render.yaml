@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: license-plate-detection
+    env: python
+    buildCommand: "./build.sh"
+    startCommand: "gunicorn --bind 0.0.0.0:$PORT app:app"
+    plan: free
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.9.16
