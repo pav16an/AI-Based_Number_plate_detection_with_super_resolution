@@ -41,7 +41,13 @@
             background: #000;
             border-radius: 15px;
             overflow: hidden;
-            margin-bottom: 2rem;
+            margin-bottom: 1rem;
+            max-width: 100%;
+        }
+        @media (min-width: 768px) {
+            .video-container {
+                margin-bottom: 2rem;
+            }
         }
         #videoElement {
             width: 100%;
@@ -58,7 +64,16 @@
         }
         .controls {
             text-align: center;
-            margin-bottom: 2rem;
+            margin-bottom: 1rem;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            justify-content: center;
+        }
+        @media (min-width: 768px) {
+            .controls {
+                margin-bottom: 2rem;
+            }
         }
         .btn-start {
             background: linear-gradient(45deg, #27ae60, #2ecc71);
@@ -105,8 +120,15 @@
         .detection-panel {
             background: white;
             border-radius: 15px;
-            padding: 1.5rem;
+            padding: 1rem;
             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            margin-top: 1rem;
+        }
+        @media (min-width: 768px) {
+            .detection-panel {
+                padding: 1.5rem;
+                margin-top: 0;
+            }
         }
         .detected-plate {
             background: #e8f5e8;
@@ -191,7 +213,7 @@
         </div>
     </nav>
 
-    <div class="container" style="margin-top: 100px;">
+    <div class="container" style="margin-top: 80px; padding: 0 10px;">
         <div class="main-container">
             <!-- Header -->
             <div class="text-center mb-4">
@@ -204,7 +226,7 @@
 
             <div class="row">
                 <!-- Video Feed -->
-                <div class="col-md-8">
+                <div class="col-12 col-md-8">
                     <div class="video-container">
                         <video id="videoElement" autoplay muted playsinline></video>
                         <canvas id="canvasElement"></canvas>
@@ -231,7 +253,7 @@
                 </div>
 
                 <!-- Detection Panel -->
-                <div class="col-md-4">
+                <div class="col-12 col-md-4">
                     <div class="detection-panel">
                         <h5 class="mb-3">
                             <i class="fas fa-search me-2"></i>Detection Results
