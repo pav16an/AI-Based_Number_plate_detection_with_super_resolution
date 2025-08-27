@@ -1,9 +1,5 @@
 flask==3.0.0
 gunicorn==21.2.0
-opencv-python-headless
-numpy
-Pillow
-torch --index-url https://download.pytorch.org/whl/cpu
-torchvision --index-url https://download.pytorch.org/whl/cpu
-ultralytics
-easyocr
+numpy==1.24.4
+Pillow==10.1.0
+opencv-python-headless==4.8.1.78
