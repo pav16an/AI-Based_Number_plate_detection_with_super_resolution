@@ -473,7 +473,7 @@
                 if (blob) {
                     processFrame(blob);
                 }
-            }, 'image/jpeg', 0.8);
+            }, 'image/jpeg', 0.5); // Reduced quality for mobile
         }
 
         function processFrame(blob) {
@@ -485,11 +485,18 @@
                 method: 'POST',
                 body: formData
             })
-            .then(response => response.json())
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
             .then(data => {
                 if (data.success) {
                     drawDetections(data.detections);
                     updateDetectedPlates(data.license_plates);
+                } else {
+                    console.error('Processing failed:', data.error);
                 }
             })
             .catch(error => {

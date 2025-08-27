@@ -92,6 +92,52 @@ def upload_file():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/process_frame', methods=['POST'])
+def process_webcam_frame():
+    try:
+        if 'frame' not in request.files:
+            return jsonify({'error': 'No frame provided'}), 400
+        
+        frame_file = request.files['frame']
+        confidence = float(request.form.get('confidence', 0.45))
+        
+        if frame_file:
+            # Mock detection for demo
+            import random
+            mock_plates = []
+            mock_detections = []
+            
+            # Randomly generate mock detections
+            if random.random() > 0.7:  # 30% chance of detection
+                plate_options = ['ABC123', 'XYZ789', 'DEF456', 'GHI789', 'JKL012']
+                detected_plate = random.choice(plate_options)
+                mock_plates.append(detected_plate)
+                
+                # Mock bounding box coordinates
+                mock_detections.append({
+                    'x1': random.randint(50, 200),
+                    'y1': random.randint(50, 150), 
+                    'x2': random.randint(250, 400),
+                    'y2': random.randint(200, 300),
+                    'label': detected_plate,
+                    'confidence': confidence
+                })
+                
+                # Save to database
+                start_time = end_time = datetime.now()
+                save_to_database(mock_plates, start_time, end_time)
+            
+            return jsonify({
+                'success': True,
+                'detections': mock_detections,
+                'license_plates': mock_plates
+            })
+        
+        return jsonify({'error': 'Invalid frame data'}), 400
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/plates')
 def get_plates():
     try:
