@@ -107,20 +107,25 @@ def process_webcam_frame():
             mock_plates = []
             mock_detections = []
             
-            # Randomly generate mock detections
-            if random.random() > 0.7:  # 30% chance of detection
-                plate_options = ['ABC123', 'XYZ789', 'DEF456', 'GHI789', 'JKL012']
+            # More frequent mock detections
+            if random.random() > 0.2:  # 80% chance of detection
+                plate_options = ['ABC123', 'XYZ789', 'DEF456', 'GHI789', 'JKL012', 'MNO345', 'PQR678']
                 detected_plate = random.choice(plate_options)
                 mock_plates.append(detected_plate)
                 
-                # Mock bounding box coordinates
+                # Mock bounding box coordinates (more realistic)
+                x1 = random.randint(100, 300)
+                y1 = random.randint(100, 200)
+                w = random.randint(120, 200)
+                h = random.randint(40, 80)
+                
                 mock_detections.append({
-                    'x1': random.randint(50, 200),
-                    'y1': random.randint(50, 150), 
-                    'x2': random.randint(250, 400),
-                    'y2': random.randint(200, 300),
+                    'x1': x1,
+                    'y1': y1, 
+                    'x2': x1 + w,
+                    'y2': y1 + h,
                     'label': detected_plate,
-                    'confidence': confidence
+                    'confidence': round(confidence + random.uniform(-0.1, 0.2), 2)
                 })
                 
                 # Save to database

@@ -510,25 +510,35 @@
             
             // Draw bounding boxes
             ctx.strokeStyle = '#00ff00';
-            ctx.lineWidth = 3;
-            ctx.font = '16px Arial';
+            ctx.lineWidth = 4;
+            ctx.font = 'bold 18px Arial';
             ctx.fillStyle = '#00ff00';
             
             detections.forEach(detection => {
                 const { x1, y1, x2, y2, label, confidence } = detection;
                 
+                // Scale coordinates to canvas size
+                const scaleX = canvasElement.width / 640;
+                const scaleY = canvasElement.height / 480;
+                
+                const scaledX1 = x1 * scaleX;
+                const scaledY1 = y1 * scaleY;
+                const scaledX2 = x2 * scaleX;
+                const scaledY2 = y2 * scaleY;
+                
                 // Draw bounding box
-                ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+                ctx.strokeRect(scaledX1, scaledY1, scaledX2 - scaledX1, scaledY2 - scaledY1);
                 
                 // Draw label background
                 const text = `${label} (${(confidence * 100).toFixed(1)}%)`;
                 const textWidth = ctx.measureText(text).width;
+                
                 ctx.fillStyle = '#00ff00';
-                ctx.fillRect(x1, y1 - 25, textWidth + 10, 25);
+                ctx.fillRect(scaledX1, scaledY1 - 30, textWidth + 15, 30);
                 
                 // Draw label text
                 ctx.fillStyle = '#000000';
-                ctx.fillText(text, x1 + 5, y1 - 5);
+                ctx.fillText(text, scaledX1 + 7, scaledY1 - 8);
             });
         }
 
