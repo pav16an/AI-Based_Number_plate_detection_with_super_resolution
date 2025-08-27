@@ -1,12 +1,8 @@
 from flask import Flask, render_template, request, jsonify
-import cv2
-import numpy as np
-import base64
 import os
 import json
 import sqlite3
 from datetime import datetime
-import re
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads'
