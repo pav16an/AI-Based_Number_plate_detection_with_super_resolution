@@ -4,7 +4,7 @@
 set -o errexit
 
 # Install Python dependencies
-pip install --upgrade pip
+pip install --upgrade pip setuptools wheel
 pip install -r requirements_deploy.txt
 
 # Create necessary directories
