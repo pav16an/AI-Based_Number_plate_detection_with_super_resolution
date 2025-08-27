@@ -3,8 +3,5 @@ services:
     name: license-plate-detection
     env: python
     buildCommand: "./build_lite.sh"
-    startCommand: "gunicorn --bind 0.0.0.0:$PORT --timeout 120 app_minimal:app"
+    startCommand: "gunicorn --bind 0.0.0.0:$PORT app_minimal:app"
     plan: free
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.9.16
