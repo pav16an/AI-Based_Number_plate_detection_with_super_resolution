@@ -1,7 +1,0 @@
-services:
-  - type: web
-    name: license-plate-detection
-    env: python
-    buildCommand: "./build_lite.sh"
-    startCommand: "gunicorn --bind 0.0.0.0:$PORT app_minimal:app"
-    plan: free
