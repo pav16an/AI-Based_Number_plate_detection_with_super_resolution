@@ -117,6 +117,20 @@
             box-shadow: 0 10px 20px rgba(52, 152, 219, 0.3);
             color: white;
         }
+        .btn-secondary {
+            background: linear-gradient(45deg, #6c757d, #5a6268);
+            border: none;
+            border-radius: 25px;
+            padding: 12px 30px;
+            font-weight: 600;
+            color: white;
+            transition: all 0.3s ease;
+        }
+        .btn-secondary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(108, 117, 125, 0.3);
+            color: white;
+        }
         .detection-panel {
             background: white;
             border-radius: 15px;
@@ -243,6 +257,9 @@
                         <button id="captureBtn" class="btn btn-capture" disabled>
                             <i class="fas fa-camera me-2"></i>Capture Frame
                         </button>
+                        <button id="flipBtn" class="btn btn-secondary" disabled>
+                            <i class="fas fa-sync-alt me-2"></i>Flip Camera
+                        </button>
                     </div>
 
                     <!-- Status -->
@@ -310,10 +327,12 @@
         let detectedPlates = new Set();
         let lastFrameTime = Date.now();
         let frameCount = 0;
+        let currentFacingMode = 'environment';
 
         const startBtn = document.getElementById('startBtn');
         const stopBtn = document.getElementById('stopBtn');
         const captureBtn = document.getElementById('captureBtn');
+        const flipBtn = document.getElementById('flipBtn');
         const statusIndicator = document.getElementById('statusIndicator');
         const statusText = document.getElementById('statusText');
         const confidenceSlider = document.getElementById('confidenceSlider');
@@ -338,7 +357,8 @@
                 stream = await navigator.mediaDevices.getUserMedia({ 
                     video: { 
                         width: { ideal: 1280 }, 
-                        height: { ideal: 720 } 
+                        height: { ideal: 720 },
+                        facingMode: currentFacingMode
                     } 
                 });
                 videoElement.srcObject = stream;
@@ -351,6 +371,7 @@
                 startBtn.disabled = true;
                 stopBtn.disabled = false;
                 captureBtn.disabled = false;
+                flipBtn.disabled = false;
                 
                 statusIndicator.className = 'status-indicator status-active';
                 statusText.textContent = 'Camera Active';
@@ -382,6 +403,7 @@
             startBtn.disabled = false;
             stopBtn.disabled = true;
             captureBtn.disabled = true;
+            flipBtn.disabled = true;
             
             statusIndicator.className = 'status-indicator status-inactive';
             statusText.textContent = 'Camera Inactive';
@@ -390,6 +412,35 @@
         // Capture frame
         captureBtn.addEventListener('click', () => {
             captureAndProcess();
+        });
+
+        // Flip camera
+        flipBtn.addEventListener('click', async () => {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                currentFacingMode = currentFacingMode === 'user' ? 'environment' : 'user';
+                
+                try {
+                    stream = await navigator.mediaDevices.getUserMedia({ 
+                        video: { 
+                            width: { ideal: 1280 }, 
+                            height: { ideal: 720 },
+                            facingMode: currentFacingMode
+                        } 
+                    });
+                    
+                    videoElement.srcObject = stream;
+                    videoElement.addEventListener('loadedmetadata', () => {
+                        canvasElement.width = videoElement.videoWidth;
+                        canvasElement.height = videoElement.videoHeight;
+                    });
+                    
+                } catch (err) {
+                    console.error('Error switching camera:', err);
+                    alert('Could not switch camera. This device may only have one camera.');
+                    currentFacingMode = currentFacingMode === 'user' ? 'environment' : 'user';
+                }
+            }
         });
 
         function startDetection() {
