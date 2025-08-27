@@ -66,15 +66,60 @@ className = ["License"]
 reader = easyocr.Reader(['en'])
 
 def easy_ocr(frame, x1, y1, x2, y2):
-    frame = frame[y1:y2, x1: x2]
-    result = reader.readtext(frame, detail=0)
-    text = result[0] if result else ""
-    pattern = re.compile('[\W]')
-    text = pattern.sub('', text)
-    text = text.replace("???", "")
-    text = text.replace("O", "0")
-    text = text.replace("粤", "")
-    return str(text)
+    # Ensure coordinates are within bounds
+    h, w = frame.shape[:2]
+    x1, y1 = max(0, x1), max(0, y1)
+    x2, y2 = min(w, x2), min(h, y2)
+    
+    cropped = frame[y1:y2, x1:x2]
+    if cropped.size == 0 or cropped.shape[0] < 10 or cropped.shape[1] < 10:
+        return ""
+    
+    # Convert to grayscale
+    if len(cropped.shape) == 3:
+        gray = cv2.cvtColor(cropped, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = cropped
+    
+    # Resize for better OCR (minimum height 50px)
+    height, width = gray.shape
+    if height < 50:
+        scale = 50 / height
+        new_width = int(width * scale)
+        gray = cv2.resize(gray, (new_width, 50), interpolation=cv2.INTER_CUBIC)
+    
+    # Image enhancement
+    blurred = cv2.GaussianBlur(gray, (3, 3), 0)
+    thresh = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+    
+    # Try OCR with enhanced image
+    try:
+        results = reader.readtext(thresh, allowlist='0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ', detail=1)
+        best_text = ""
+        best_conf = 0
+        
+        for (bbox, text, conf) in results:
+            if conf > best_conf and len(text) >= 3:
+                best_text = text
+                best_conf = conf
+        
+        if not best_text or best_conf < 0.6:
+            # Fallback to original image
+            results = reader.readtext(gray, detail=0)
+            best_text = results[0] if results else ""
+        
+        # Clean and validate text
+        if best_text:
+            clean_text = re.sub(r'[^A-Z0-9]', '', best_text.upper())
+            # Must be 3-10 chars and contain at least one digit
+            if 3 <= len(clean_text) <= 10 and any(c.isdigit() for c in clean_text):
+                return clean_text
+        
+        return ""
+        
+    except Exception as e:
+        print(f"OCR Error: {e}")
+        return ""
 
 
 
@@ -128,7 +173,7 @@ license_plates = set()
 # Process image if source is an image file
 if cap is None:
     frame = image.copy()
-    results = model.predict(frame, conf=0.45)
+    results = model.predict(frame, conf=0.6)
     for result in results:
         # Handle both old and new result formats
         if hasattr(result, 'boxes'):
@@ -145,7 +190,7 @@ if cap is None:
                 x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
                 classNameInt = int(box.cls[0])
-                clsName = className[classNameInt]
+                clsName = classNameInt
                 conf = math.ceil(box.conf[0]*100)/100
                 label = easy_ocr(frame, x1, y1, x2, y2)
                 if label:
@@ -172,7 +217,7 @@ else:
         currentTime = datetime.now()
         count += 1
         print(f"Frame Number: {count}")
-        results = model.predict(frame, conf = 0.45)
+        results = model.predict(frame, conf=0.6)
         for result in results:
             # Handle both old and new result formats
             if hasattr(result, 'boxes'):

@@ -34,7 +34,13 @@ except Exception as e:
         print(f"Error loading standard model: {e2}")
         model = None
 
-reader = easyocr.Reader(['en'])
+# Initialize EasyOCR with optimized settings for license plates
+try:
+    reader = easyocr.Reader(['en'], gpu=False)  # Set gpu=True if you have CUDA
+    print("EasyOCR initialized successfully")
+except Exception as e:
+    print(f"Error initializing EasyOCR: {e}")
+    reader = None
 className = ["License"]
 
 def init_database():
@@ -57,24 +63,180 @@ def init_database():
     conn.close()
     print("Database initialized successfully")
 
-def easy_ocr(frame, x1, y1, x2, y2):
-    """Extract text from license plate region using EasyOCR"""
+def validate_license_plate(text):
+    """Enhanced validation for license plate text"""
+    if not text or len(text) < 3 or len(text) > 10:
+        return False
+    
+    # Must contain at least one digit
+    if not any(c.isdigit() for c in text):
+        return False
+    
+    # Should not be all digits or all letters
+    if text.isdigit() or text.isalpha():
+        return False
+    
+    # Common OCR errors to reject
+    invalid_patterns = ['III', '000', 'OOO', 'LLL', '111']
+    if text in invalid_patterns:
+        return False
+    
+    return True
+
+def fast_ocr(frame, x1, y1, x2, y2):
+    """Fast OCR optimized for webcam detection"""
     try:
-        cropped = frame[y1:y2, x1:x2]
-        if cropped.size == 0:
+        # Extract ROI
+        h, w = frame.shape[:2]
+        x1, y1 = max(0, x1), max(0, y1)
+        x2, y2 = min(w, x2), min(h, y2)
+        
+        roi = frame[y1:y2, x1:x2]
+        if roi.size == 0 or roi.shape[0] < 15 or roi.shape[1] < 30:
             return ""
         
-        result = reader.readtext(cropped, detail=0)
-        text = result[0] if result else ""
+        # Convert to grayscale
+        if len(roi.shape) == 3:
+            gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+        else:
+            gray = roi
         
-        # Clean up the text
-        pattern = re.compile('[\\W]')
-        text = pattern.sub('', text)
-        text = text.replace("???", "")
-        text = text.replace("O", "0")
-        text = text.replace("粤", "")
+        # Simple but effective preprocessing
+        # Resize if too small
+        if gray.shape[0] < 32:
+            scale = 32 / gray.shape[0]
+            new_w = int(gray.shape[1] * scale)
+            gray = cv2.resize(gray, (new_w, 32), interpolation=cv2.INTER_CUBIC)
         
-        return str(text)
+        # Basic enhancement
+        gray = cv2.GaussianBlur(gray, (3, 3), 0)
+        _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        
+        # Fast OCR
+        results = reader.readtext(thresh, allowlist='0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ', detail=1)
+        
+        best_text = ""
+        best_conf = 0
+        
+        for (bbox, text, conf) in results:
+            if conf > best_conf and len(text) >= 3:
+                clean_text = re.sub(r'[^A-Z0-9]', '', text.upper())
+                if 3 <= len(clean_text) <= 10 and any(c.isdigit() for c in clean_text) and any(c.isalpha() for c in clean_text):
+                    best_text = clean_text
+                    best_conf = conf
+        
+        return best_text if best_conf > 0.6 else ""
+        
+    except Exception:
+        return ""
+
+def easy_ocr(frame, x1, y1, x2, y2):
+    """Extract text from license plate region using EasyOCR with enhanced preprocessing"""
+    try:
+        # Ensure coordinates are within frame bounds
+        h, w = frame.shape[:2]
+        x1, y1 = max(0, x1), max(0, y1)
+        x2, y2 = min(w, x2), min(h, y2)
+        
+        # Extract the license plate region
+        cropped = frame[y1:y2, x1:x2]
+        if cropped.size == 0 or cropped.shape[0] < 10 or cropped.shape[1] < 10:
+            return ""
+        
+        # Convert to grayscale
+        if len(cropped.shape) == 3:
+            gray = cv2.cvtColor(cropped, cv2.COLOR_BGR2GRAY)
+        else:
+            gray = cropped
+        
+        # Multiple preprocessing approaches
+        processed_images = []
+        
+        # 1. Original grayscale
+        processed_images.append(("original", gray))
+        
+        # 2. Resize if too small
+        height, width = gray.shape
+        if height < 40:
+            scale = 40 / height
+            new_width = int(width * scale)
+            resized = cv2.resize(gray, (new_width, 40), interpolation=cv2.INTER_CUBIC)
+            processed_images.append(("resized", resized))
+        
+        # 3. Contrast enhancement
+        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
+        enhanced = clahe.apply(gray)
+        processed_images.append(("enhanced", enhanced))
+        
+        # 4. Gaussian blur + adaptive threshold
+        blurred = cv2.GaussianBlur(gray, (3, 3), 0)
+        adaptive = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                                       cv2.THRESH_BINARY, 11, 2)
+        processed_images.append(("adaptive", adaptive))
+        
+        # 5. OTSU thresholding
+        _, otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        processed_images.append(("otsu", otsu))
+        
+        # 6. Morphological operations
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 1))
+        morph = cv2.morphologyEx(adaptive, cv2.MORPH_CLOSE, kernel)
+        processed_images.append(("morph", morph))
+        
+        best_result = ""
+        best_confidence = 0
+        
+        # Try OCR on each processed image
+        for name, img in processed_images:
+            try:
+                # Method 1: EasyOCR with allowlist
+                results = reader.readtext(img, 
+                                        allowlist='0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+                                        width_ths=0.7,
+                                        height_ths=0.7,
+                                        detail=1)
+                
+                for (bbox, text, confidence) in results:
+                    if confidence > best_confidence and len(text) >= 3:
+                        clean_text = re.sub(r'[^A-Z0-9]', '', text.upper())
+                        if validate_license_plate(clean_text):
+                            best_result = clean_text
+                            best_confidence = confidence
+                            print(f"OCR ({name}): '{clean_text}' conf={confidence:.3f}")
+                
+                # Method 2: Fallback without allowlist
+                if not best_result:
+                    results = reader.readtext(img, detail=1)
+                    for (bbox, text, confidence) in results:
+                        if confidence > 0.4 and len(text) >= 3:
+                            clean_text = re.sub(r'[^A-Z0-9]', '', text.upper())
+                            if validate_license_plate(clean_text) and confidence > best_confidence:
+                                best_result = clean_text
+                                best_confidence = confidence
+                                
+            except Exception as ocr_error:
+                continue
+        
+        # Final validation and scoring
+        if best_result and best_confidence > 0.5:
+            # Score the result
+            score = 0
+            if 6 <= len(best_result) <= 8:
+                score += 3
+            elif 4 <= len(best_result) <= 9:
+                score += 2
+            
+            letters = sum(1 for c in best_result if c.isalpha())
+            digits = sum(1 for c in best_result if c.isdigit())
+            if 2 <= letters <= 4 and 2 <= digits <= 4:
+                score += 2
+            
+            if score >= 2:  # Only return high-quality results
+                print(f"Final OCR Result: '{best_result}' (confidence: {best_confidence:.2f}, score: {score})")
+                return best_result
+        
+        return ""
+        
     except Exception as e:
         print(f"OCR Error: {e}")
         return ""
@@ -131,7 +293,7 @@ def save_json_data(license_plates, start_time, end_time):
     except Exception as e:
         print(f"JSON Save Error: {e}")
 
-def process_image(image_path, confidence=0.45):
+def process_image(image_path, confidence=0.6):
     """Process image for license plate detection"""
     if model is None:
         return None, []
@@ -167,8 +329,9 @@ def process_image(image_path, confidence=0.45):
                     
                     # Extract text using OCR
                     label = easy_ocr(original_frame, x1, y1, x2, y2)
-                    if label:
+                    if label and len(label) >= 3:
                         license_plates.add(label)
+                        print(f"Image detection - License plate: {label}")
                     
                     # Add text label
                     if label:
@@ -190,8 +353,8 @@ def process_image(image_path, confidence=0.45):
         print(f"Processing Error: {e}")
         return None, []
 
-def process_frame(frame_data, confidence=0.45):
-    """Process video frame for license plate detection"""
+def process_frame(frame_data, confidence=0.5):
+    """Fast and accurate frame processing for webcam detection"""
     if model is None:
         return [], []
     
@@ -203,50 +366,66 @@ def process_frame(frame_data, confidence=0.45):
         if frame is None:
             return [], []
         
-        original_frame = frame.copy()
-        license_plates = set()
+        # Resize frame for faster processing while maintaining quality
+        h, w = frame.shape[:2]
+        if w > 640:
+            scale = 640 / w
+            new_w, new_h = 640, int(h * scale)
+            frame_resized = cv2.resize(frame, (new_w, new_h))
+            scale_factor = w / 640
+        else:
+            frame_resized = frame
+            scale_factor = 1.0
+        
+        license_plates = []
         detections = []
         
-        # Run YOLO detection
-        results = model.predict(frame, conf=confidence)
+        # Run YOLO detection on resized frame for speed
+        results = model.predict(frame_resized, conf=confidence, verbose=False, imgsz=640)
         
         for result in results:
-            # Handle different result formats
-            if hasattr(result, 'boxes'):
+            if hasattr(result, 'boxes') and result.boxes is not None and len(result.boxes) > 0:
                 boxes = result.boxes
-            else:
-                boxes = result
-                if hasattr(boxes, 'xyxy'):
-                    boxes = [boxes]
-            
-            for box in boxes:
-                if hasattr(box, 'xyxy'):
-                    x1, y1, x2, y2 = box.xyxy[0]
-                    x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
-                    conf = float(box.conf[0]) if hasattr(box, 'conf') else confidence
-                    
-                    # Extract text using OCR
-                    label = easy_ocr(original_frame, x1, y1, x2, y2)
-                    if label:
-                        license_plates.add(label)
+                
+                # Process up to 3 best detections for speed
+                num_boxes = min(len(boxes), 3)
+                
+                for i in range(num_boxes):
+                    try:
+                        x1, y1, x2, y2 = boxes.xyxy[i]
+                        conf = float(boxes.conf[i])
                         
-                        # Add detection info
-                        detections.append({
-                            'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2,
-                            'label': label,
-                            'confidence': conf
-                        })
+                        # Scale coordinates back to original size
+                        x1, y1, x2, y2 = int(x1 * scale_factor), int(y1 * scale_factor), int(x2 * scale_factor), int(y2 * scale_factor)
+                        
+                        # Quick validation
+                        if x2 <= x1 or y2 <= y1 or (x2-x1) < 30 or (y2-y1) < 15:
+                            continue
+                        
+                        # Fast OCR with simplified preprocessing
+                        label = fast_ocr(frame, x1, y1, x2, y2)
+                        
+                        if label:
+                            license_plates.append(label)
+                            detections.append({
+                                'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2,
+                                'label': label,
+                                'confidence': conf
+                            })
+                        
+                    except Exception:
+                        continue
         
-        # Save results if any plates detected
+        # Only save if we have valid plates
         if license_plates:
-            start_time = end_time = datetime.now()
-            save_to_database(license_plates, start_time, end_time)
-            save_json_data(license_plates, start_time, end_time)
+            unique_plates = list(dict.fromkeys(license_plates))
+            # Skip database save for webcam to improve speed
+            print(f"Detected: {unique_plates}")
         
-        return detections, list(license_plates)
+        return detections, license_plates
         
     except Exception as e:
-        print(f"Frame Processing Error: {e}")
+        print(f"Frame error: {e}")
         return [], []
 
 @app.route('/')
@@ -357,28 +536,47 @@ def get_plates():
 
 @app.route('/process_frame', methods=['POST'])
 def process_webcam_frame():
-    """Process webcam frame for live detection"""
+    """Process webcam frame for live detection with enhanced multi-plate support"""
     try:
         if 'frame' not in request.files:
             return jsonify({'error': 'No frame provided'}), 400
         
         frame_file = request.files['frame']
-        confidence = float(request.form.get('confidence', 0.45))
+        confidence = float(request.form.get('confidence', 0.5))  # Balanced for speed and accuracy
+        
+        # Validate confidence range
+        confidence = max(0.1, min(0.9, confidence))
         
         if frame_file:
             frame_data = frame_file.read()
+            
+            # Check if frame data is valid
+            if len(frame_data) == 0:
+                return jsonify({'error': 'Empty frame data'}), 400
+            
             detections, license_plates = process_frame(frame_data, confidence)
+            
+            # Log detection results
+            if license_plates:
+                print(f"Webcam processed: {len(detections)} detections, {len(license_plates)} plates: {license_plates}")
             
             return jsonify({
                 'success': True,
                 'detections': detections,
-                'license_plates': license_plates
+                'license_plates': license_plates,
+                'frame_size': len(frame_data),
+                'confidence_used': confidence
             })
         
         return jsonify({'error': 'Invalid frame data'}), 400
         
+    except ValueError as ve:
+        print(f"Webcam Frame Processing Value Error: {ve}")
+        return jsonify({'error': f'Invalid confidence value: {ve}'}), 400
     except Exception as e:
         print(f"Webcam Frame Processing Error: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/test_db')

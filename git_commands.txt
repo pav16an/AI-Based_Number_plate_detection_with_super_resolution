@@ -1,0 +1,29 @@
+# Commands to push to GitHub
+
+# 1. Initialize git repository (if not already done)
+git init
+
+# 2. Add all files
+git add .
+
+# 3. Create initial commit
+git commit -m "Initial commit: License Plate Detection System with optimized webcam detection"
+
+# 4. Add your GitHub repository as remote (replace with your repo URL)
+git remote add origin https://github.com/yourusername/license-plate-detection.git
+
+# 5. Push to GitHub
+git push -u origin main
+
+# Alternative if you're using master branch:
+# git push -u origin master
+
+# If you get errors about branch names, use:
+# git branch -M main
+# git push -u origin main
+
+# To check status at any time:
+# git status
+
+# To see what files are tracked:
+# git ls-files

@@ -303,12 +303,28 @@
                         <hr>
                         <h6><i class="fas fa-cog me-2"></i>Settings</h6>
                         <div class="mb-2">
-                            <label for="confidenceSlider" class="form-label">Confidence: <span id="confidenceValue">0.45</span></label>
-                            <input type="range" class="form-range" id="confidenceSlider" min="0.1" max="0.9" step="0.05" value="0.45">
+                            <label for="confidenceSlider" class="form-label">Confidence: <span id="confidenceValue">0.5</span></label>
+                            <input type="range" class="form-range" id="confidenceSlider" min="0.3" max="0.8" step="0.05" value="0.5">
                         </div>
                         <div class="mb-2">
-                            <label for="intervalSlider" class="form-label">Detection Interval: <span id="intervalValue">1000</span>ms</label>
-                            <input type="range" class="form-range" id="intervalSlider" min="500" max="3000" step="100" value="1000">
+                            <label for="intervalSlider" class="form-label">Detection Interval: <span id="intervalValue">800</span>ms</label>
+                            <input type="range" class="form-range" id="intervalSlider" min="500" max="3000" step="200" value="800">
+                        </div>
+                        <div class="mb-2">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="continuousDetection" checked>
+                                <label class="form-check-label" for="continuousDetection">
+                                    Continuous Detection
+                                </label>
+                            </div>
+                        </div>
+                        <div class="mb-2">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="saveToDatabase">
+                                <label class="form-check-label" for="saveToDatabase">
+                                    Save to Database
+                                </label>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -328,6 +344,9 @@
         let lastFrameTime = Date.now();
         let frameCount = 0;
         let currentFacingMode = 'environment';
+        let processingFrame = false;
+        let plateHistory = new Map(); // Track plates with timestamps
+        let lastDetectionTime = 0;
 
         const startBtn = document.getElementById('startBtn');
         const stopBtn = document.getElementById('stopBtn');
@@ -351,6 +370,16 @@
             }
         });
 
+        // Continuous detection toggle
+        document.getElementById('continuousDetection').addEventListener('change', (e) => {
+            if (detectionInterval) {
+                clearInterval(detectionInterval);
+                if (e.target.checked) {
+                    startDetection();
+                }
+            }
+        });
+
         // Start camera
         startBtn.addEventListener('click', async () => {
             try {
@@ -358,7 +387,8 @@
                     video: { 
                         width: { ideal: 1280 }, 
                         height: { ideal: 720 },
-                        facingMode: currentFacingMode
+                        facingMode: currentFacingMode,
+                        frameRate: { ideal: 15 }
                     } 
                 });
                 videoElement.srcObject = stream;
@@ -425,7 +455,8 @@
                         video: { 
                             width: { ideal: 1280 }, 
                             height: { ideal: 720 },
-                            facingMode: currentFacingMode
+                            facingMode: currentFacingMode,
+                            frameRate: { ideal: 15 }
                         } 
                     });
                     
@@ -444,10 +475,21 @@
         });
 
         function startDetection() {
+            if (!document.getElementById('continuousDetection').checked) return;
+            
             const interval = parseInt(intervalSlider.value);
             detectionInterval = setInterval(() => {
-                captureAndProcess();
+                if (!processingFrame) {
+                    captureAndProcess();
+                }
             }, interval);
+            
+            // Also process immediately
+            setTimeout(() => {
+                if (!processingFrame) {
+                    captureAndProcess();
+                }
+            }, 100);
         }
 
         function startFPSCounter() {
@@ -461,19 +503,28 @@
         }
 
         function captureAndProcess() {
-            if (!videoElement.videoWidth || !videoElement.videoHeight) return;
+            if (!videoElement.videoWidth || !videoElement.videoHeight || processingFrame) return;
             
             frameCount++;
+            processingFrame = true;
             
-            // Draw video frame to canvas
-            ctx.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
+            // Create a temporary canvas for better quality capture
+            const tempCanvas = document.createElement('canvas');
+            const tempCtx = tempCanvas.getContext('2d');
             
-            // Convert canvas to blob and send for processing
-            canvasElement.toBlob(blob => {
+            // Set canvas size to video dimensions for better quality
+            tempCanvas.width = videoElement.videoWidth;
+            tempCanvas.height = videoElement.videoHeight;
+            
+            // Draw video frame to temporary canvas
+            tempCtx.drawImage(videoElement, 0, 0);
+            
+            // Convert canvas to blob with optimized quality for speed
+            tempCanvas.toBlob(blob => {
                 if (blob) {
                     processFrame(blob);
                 }
-            }, 'image/jpeg', 0.5); // Reduced quality for mobile
+            }, 'image/jpeg', 0.6); // Balanced quality for speed
         }
 
         function processFrame(blob) {
@@ -492,14 +543,19 @@
                 return response.json();
             })
             .then(data => {
+                processingFrame = false;
                 if (data.success) {
                     drawDetections(data.detections);
-                    updateDetectedPlates(data.license_plates);
+                    if (data.license_plates && data.license_plates.length > 0) {
+                        updateDetectedPlates(data.license_plates);
+                        lastDetectionTime = Date.now();
+                    }
                 } else {
                     console.error('Processing failed:', data.error);
                 }
             })
             .catch(error => {
+                processingFrame = false;
                 console.error('Error processing frame:', error);
             });
         }
@@ -508,18 +564,20 @@
             // Clear previous drawings
             ctx.clearRect(0, 0, canvasElement.width, canvasElement.height);
             
-            // Draw bounding boxes
-            ctx.strokeStyle = '#00ff00';
-            ctx.lineWidth = 4;
-            ctx.font = 'bold 18px Arial';
-            ctx.fillStyle = '#00ff00';
+            if (!detections || detections.length === 0) return;
             
-            detections.forEach(detection => {
+            // Draw bounding boxes with different colors for multiple plates
+            const colors = ['#00ff00', '#ff6b00', '#ff0066', '#6600ff', '#00ffff'];
+            ctx.lineWidth = 3;
+            ctx.font = 'bold 16px Arial';
+            
+            detections.forEach((detection, index) => {
                 const { x1, y1, x2, y2, label, confidence } = detection;
+                const color = colors[index % colors.length];
                 
-                // Scale coordinates to canvas size
-                const scaleX = canvasElement.width / 640;
-                const scaleY = canvasElement.height / 480;
+                // Use actual coordinates (no scaling needed if server returns correct coords)
+                const scaleX = canvasElement.width / videoElement.videoWidth;
+                const scaleY = canvasElement.height / videoElement.videoHeight;
                 
                 const scaledX1 = x1 * scaleX;
                 const scaledY1 = y1 * scaleY;
@@ -527,49 +585,106 @@
                 const scaledY2 = y2 * scaleY;
                 
                 // Draw bounding box
+                ctx.strokeStyle = color;
                 ctx.strokeRect(scaledX1, scaledY1, scaledX2 - scaledX1, scaledY2 - scaledY1);
                 
-                // Draw label background
-                const text = `${label} (${(confidence * 100).toFixed(1)}%)`;
-                const textWidth = ctx.measureText(text).width;
+                // Draw corner markers for better visibility
+                const cornerSize = 15;
+                ctx.lineWidth = 4;
+                // Top-left corner
+                ctx.beginPath();
+                ctx.moveTo(scaledX1, scaledY1 + cornerSize);
+                ctx.lineTo(scaledX1, scaledY1);
+                ctx.lineTo(scaledX1 + cornerSize, scaledY1);
+                ctx.stroke();
                 
-                ctx.fillStyle = '#00ff00';
-                ctx.fillRect(scaledX1, scaledY1 - 30, textWidth + 15, 30);
+                // Top-right corner
+                ctx.beginPath();
+                ctx.moveTo(scaledX2 - cornerSize, scaledY1);
+                ctx.lineTo(scaledX2, scaledY1);
+                ctx.lineTo(scaledX2, scaledY1 + cornerSize);
+                ctx.stroke();
                 
-                // Draw label text
-                ctx.fillStyle = '#000000';
-                ctx.fillText(text, scaledX1 + 7, scaledY1 - 8);
+                // Bottom-left corner
+                ctx.beginPath();
+                ctx.moveTo(scaledX1, scaledY2 - cornerSize);
+                ctx.lineTo(scaledX1, scaledY2);
+                ctx.lineTo(scaledX1 + cornerSize, scaledY2);
+                ctx.stroke();
+                
+                // Bottom-right corner
+                ctx.beginPath();
+                ctx.moveTo(scaledX2 - cornerSize, scaledY2);
+                ctx.lineTo(scaledX2, scaledY2);
+                ctx.lineTo(scaledX2, scaledY2 - cornerSize);
+                ctx.stroke();
+                
+                // Draw label with background
+                if (label) {
+                    const text = `${label} (${(confidence * 100).toFixed(1)}%)`;
+                    ctx.font = 'bold 14px Arial';
+                    const textMetrics = ctx.measureText(text);
+                    const textWidth = textMetrics.width;
+                    const textHeight = 20;
+                    
+                    // Background
+                    ctx.fillStyle = color;
+                    ctx.fillRect(scaledX1, scaledY1 - textHeight - 5, textWidth + 10, textHeight + 5);
+                    
+                    // Text
+                    ctx.fillStyle = '#000000';
+                    ctx.fillText(text, scaledX1 + 5, scaledY1 - 8);
+                }
+                
+                ctx.lineWidth = 3; // Reset line width
             });
         }
 
         function updateDetectedPlates(plates) {
-            if (plates.length === 0) return;
+            if (!plates || plates.length === 0) return;
             
             const detectedPlatesDiv = document.getElementById('detectedPlates');
-            
-            plates.forEach(plate => {
-                if (!detectedPlates.has(plate)) {
-                    detectedPlates.add(plate);
-                    sessionDetections++;
+            const currentTime = Date.now();
+            plates.forEach((plate, index) => {
+                // Check if this is a new detection
+                const lastSeen = plateHistory.get(plate);
+                const isNewDetection = !lastSeen || (currentTime - lastSeen) > 3000; // 3 second cooldown
+                
+                if (isNewDetection) {
+                    plateHistory.set(plate, currentTime);
                     
-                    // Add to display
-                    const plateDiv = document.createElement('div');
-                    plateDiv.className = 'detected-plate';
-                    plateDiv.innerHTML = `
-                        <div class="plate-text">${plate}</div>
-                        <div class="plate-time">${new Date().toLocaleTimeString()}</div>
-                    `;
-                    
-                    if (detectedPlatesDiv.querySelector('p')) {
-                        detectedPlatesDiv.innerHTML = '';
-                    }
-                    
-                    detectedPlatesDiv.insertBefore(plateDiv, detectedPlatesDiv.firstChild);
-                    
-                    // Keep only last 5 detections visible
-                    const plates = detectedPlatesDiv.querySelectorAll('.detected-plate');
-                    if (plates.length > 5) {
-                        plates[plates.length - 1].remove();
+                    if (!detectedPlates.has(plate)) {
+                        detectedPlates.add(plate);
+                        sessionDetections++;
+                        
+                        // Simple color coding
+                        const colors = ['#e8f5e8', '#fff3e0', '#fce4ec'];
+                        const bgColor = colors[index % colors.length];
+                        const borderColors = ['#27ae60', '#ff6b00', '#ff0066'];
+                        const borderColor = borderColors[index % borderColors.length];
+                        
+                        // Add to display
+                        const plateDiv = document.createElement('div');
+                        plateDiv.className = 'detected-plate';
+                        plateDiv.style.backgroundColor = bgColor;
+                        plateDiv.style.borderColor = borderColor;
+                        plateDiv.innerHTML = `
+                            <div class="plate-text" style="color: ${borderColor}">${plate}</div>
+                            <div class="plate-time">${new Date().toLocaleTimeString()}</div>
+                        `;
+                        
+                        // Clear placeholder text
+                        if (detectedPlatesDiv.querySelector('p')) {
+                            detectedPlatesDiv.innerHTML = '';
+                        }
+                        
+                        detectedPlatesDiv.insertBefore(plateDiv, detectedPlatesDiv.firstChild);
+                        
+                        // Keep only last 5 detections visible
+                        const plateElements = detectedPlatesDiv.querySelectorAll('.detected-plate');
+                        if (plateElements.length > 5) {
+                            plateElements[plateElements.length - 1].remove();
+                        }
                     }
                 }
             });
@@ -577,6 +692,16 @@
             // Update statistics
             document.getElementById('sessionDetections').textContent = sessionDetections;
             updateTotalDetections();
+            
+            // Clean up old entries from history (keep last 100)
+            if (plateHistory.size > 100) {
+                const entries = Array.from(plateHistory.entries());
+                entries.sort((a, b) => b[1] - a[1]); // Sort by timestamp, newest first
+                plateHistory.clear();
+                entries.slice(0, 100).forEach(([plate, time]) => {
+                    plateHistory.set(plate, time);
+                });
+            }
         }
 
         function updateTotalDetections() {
