@@ -32,7 +32,7 @@ class Config:
     # Model settings
     MODEL_PATH = os.environ.get('MODEL_PATH', str(BASE_DIR / 'weights' / 'best.pt'))
     FALLBACK_MODEL = 'yolov8n.pt'
-    DEFAULT_CONFIDENCE = float(os.environ.get('DEFAULT_CONFIDENCE', 0.6))
+    DEFAULT_CONFIDENCE = float(os.environ.get('DEFAULT_CONFIDENCE', 0.35))
     MODEL_DEVICE = os.environ.get('MODEL_DEVICE', 'cpu')  # 'cpu' or 'cuda'
     
     # OCR settings

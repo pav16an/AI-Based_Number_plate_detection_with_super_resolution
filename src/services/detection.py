@@ -106,7 +106,19 @@ class YOLODetector(ModelLoader):
         
         try:
             confidence = conf or self.confidence
-            results = self.model(image, conf=confidence, iou=iou, max_det=max_det, device=self.device)
+            image_height, image_width = image.shape[:2]
+            max_side = max(image_height, image_width)
+            imgsz = min(1600, max(960, ((max_side + 31) // 32) * 32))
+
+            results = self.model(
+                image,
+                conf=confidence,
+                iou=iou,
+                max_det=max_det,
+                imgsz=imgsz,
+                device=self.device,
+                verbose=False,
+            )
             
             detections = []
             for result in results:
@@ -517,11 +529,16 @@ class DetectionService:
         upscaled = cv2.resize(image, (w * 2, h * 2), interpolation=cv2.INTER_CUBIC)
         retries.append((upscaled, lower_conf, 0, 0, 2.0))
 
+        # Contrast-enhanced retry can recover low-contrast or dim plates.
+        enhanced = ImagePreprocessor.enhance_contrast(image, alpha=1.35, beta=18)
+        retries.append((enhanced, lower_conf, 0, 0, 1.0))
+
         # Focus on the lower-center region where front/rear plates usually appear.
         crop_y1 = int(h * 0.35)
         crop_x1 = int(w * 0.10)
         crop = image[crop_y1:h, crop_x1:int(w * 0.90)]
         if crop.size > 0:
+            retries.append((crop, lower_conf, crop_x1, crop_y1, 1.0))
             crop_upscaled = cv2.resize(crop, (crop.shape[1] * 2, crop.shape[0] * 2), interpolation=cv2.INTER_CUBIC)
             retries.append((crop_upscaled, lower_conf, crop_x1, crop_y1, 2.0))
 

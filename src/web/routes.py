@@ -127,7 +127,10 @@ def upload():
         if image is None:
             return jsonify({"error": "Failed to read uploaded image"}), 400
 
-        detections = current_app.detection_service.detect_and_recognize(image)
+        detections = current_app.detection_service.detect_and_recognize(
+            image,
+            conf=max(0.25, current_app.config["DEFAULT_CONFIDENCE"]),
+        )
         _save_valid_detections(detections, source="image", image_path=filepath)
 
         annotated = draw_detections(image, detections, ["License"])
@@ -140,6 +143,7 @@ def upload():
                 "image": base64.b64encode(buffer).decode("utf-8"),
                 "license_plates": [item.get("text") for item in detections if item.get("text")],
                 "detections": [_serialize_detection(item) for item in detections],
+                "count": len(detections),
             }
         )
     except RuntimeError as exc:

@@ -383,7 +383,7 @@
                 // Display results
                 if (data.image) {
                     resultImage.src = 'data:image/jpeg;base64,' + data.image;
-                    displayLicensePlates(data.license_plates);
+                    displayLicensePlates(data.license_plates, data.detections || []);
                     resultSection.style.display = 'block';
                 }
             })
@@ -394,12 +394,16 @@
             });
         }
 
-        function displayLicensePlates(plates) {
+        function displayLicensePlates(plates, detections = []) {
             plateList.innerHTML = '';
             plateCount.textContent = plates.length;
 
             if (plates.length === 0) {
-                plateList.innerHTML = '<p class="text-muted">No license plates detected</p>';
+                if (detections.length > 0) {
+                    plateList.innerHTML = '<p class="text-muted">Plate region detected, but OCR could not read the text clearly.</p>';
+                } else {
+                    plateList.innerHTML = '<p class="text-muted">No license plates detected</p>';
+                }
                 return;
             }
 
