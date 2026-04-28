@@ -371,14 +371,24 @@
                 method: 'POST',
                 body: formData
             })
-            .then(response => response.json())
+            .then(async response => {
+                let data;
+                try {
+                    data = await response.json();
+                } catch (error) {
+                    const text = await response.text();
+                    throw new Error(text || `HTTP ${response.status}`);
+                }
+
+                if (!response.ok) {
+                    const details = data.details ? `\nDetails: ${data.details}` : '';
+                    throw new Error((data.error || `HTTP ${response.status}`) + details);
+                }
+
+                return data;
+            })
             .then(data => {
                 loading.style.display = 'none';
-                
-                if (data.error) {
-                    alert('Error: ' + data.error);
-                    return;
-                }
 
                 // Display results
                 if (data.image) {
@@ -390,7 +400,7 @@
             .catch(error => {
                 loading.style.display = 'none';
                 console.error('Error:', error);
-                alert('An error occurred while processing the image.');
+                alert('Error: ' + error.message);
             });
         }
 

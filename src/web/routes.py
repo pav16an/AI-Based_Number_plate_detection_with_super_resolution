@@ -17,6 +17,13 @@ logger = get_logger(__name__)
 web = Blueprint("web", __name__)
 
 
+def _should_expose_error_details() -> bool:
+    """Expose diagnostic details outside production only when explicitly enabled."""
+    if current_app.config.get("DEBUG"):
+        return True
+    return os.environ.get("EXPOSE_ERROR_DETAILS", "False").lower() == "true"
+
+
 def _import_cv2():
     try:
         import cv2  # type: ignore
@@ -116,22 +123,34 @@ def upload():
 
         _ensure_runtime_services()
         cv2 = _import_cv2()
+        np = _import_numpy()
 
         filename = secure_filename(file.filename)
+        file_bytes = file.read()
+        if not file_bytes:
+            return jsonify({"error": "Uploaded file is empty"}), 400
+
+        image = cv2.imdecode(np.frombuffer(file_bytes, np.uint8), cv2.IMREAD_COLOR)
+        if image is None:
+            return jsonify({"error": "Failed to decode uploaded image"}), 400
+
         upload_dir = current_app.config["UPLOAD_FOLDER"]
         os.makedirs(upload_dir, exist_ok=True)
         filepath = os.path.join(upload_dir, filename)
-        file.save(filepath)
-
-        image = cv2.imread(filepath)
-        if image is None:
-            return jsonify({"error": "Failed to read uploaded image"}), 400
 
         detections = current_app.detection_service.detect_and_recognize(
             image,
             conf=max(0.25, current_app.config["DEFAULT_CONFIDENCE"]),
         )
         _save_valid_detections(detections, source="image", image_path=filepath)
+
+        # Best-effort persistence for later review; detection should not fail if this write fails.
+        try:
+            with open(filepath, "wb") as output_file:
+                output_file.write(file_bytes)
+        except Exception as save_exc:
+            logger.warning("Could not persist uploaded file %s: %s", filepath, save_exc)
+            filepath = None
 
         annotated = draw_detections(image, detections, ["License"])
         success, buffer = cv2.imencode(".jpg", annotated)
@@ -151,7 +170,10 @@ def upload():
         return jsonify({"error": str(exc)}), 503
     except Exception as exc:
         logger.error("Upload route failed: %s", exc, exc_info=True)
-        return jsonify({"error": "Image processing failed"}), 500
+        payload = {"error": "Image processing failed"}
+        if _should_expose_error_details():
+            payload["details"] = str(exc)
+        return jsonify(payload), 500
 
 
 @web.route("/process_frame", methods=["POST"])
@@ -189,7 +211,10 @@ def process_frame():
         return jsonify({"success": False, "error": str(exc)}), 503
     except Exception as exc:
         logger.error("Webcam route failed: %s", exc, exc_info=True)
-        return jsonify({"success": False, "error": "Frame processing failed"}), 500
+        payload = {"success": False, "error": "Frame processing failed"}
+        if _should_expose_error_details():
+            payload["details"] = str(exc)
+        return jsonify(payload), 500
 
 
 @web.route("/api/plates", methods=["GET"])

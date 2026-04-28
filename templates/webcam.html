@@ -570,7 +570,7 @@
                         lastDetectionTime = Date.now();
                     }
                 } else {
-                    console.error('Processing failed:', data.error);
+                    console.error('Processing failed:', data.error, data.details || '');
                     ctx.clearRect(0, 0, canvasElement.width, canvasElement.height);
                 }
             })

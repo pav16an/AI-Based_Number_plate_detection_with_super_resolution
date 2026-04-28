@@ -65,6 +65,14 @@ class YOLODetector(ModelLoader):
         """Load YOLO model"""
         try:
             from ultralytics import YOLO
+            from ultralytics.nn import tasks as ultralytics_tasks
+
+            # Compatibility shim for weights saved from YOLOv10-based training code.
+            # Some checkpoints reference YOLOv10DetectionModel during deserialization,
+            # while newer or different Ultralytics builds only expose DetectionModel.
+            if not hasattr(ultralytics_tasks, 'YOLOv10DetectionModel') and hasattr(ultralytics_tasks, 'DetectionModel'):
+                ultralytics_tasks.YOLOv10DetectionModel = ultralytics_tasks.DetectionModel
+                logger.info("Registered YOLOv10DetectionModel compatibility alias")
             
             # Try to load custom model
             if os.path.exists(self.model_path):
