@@ -1,149 +1,163 @@
 # License Plate Detection System
 
-A real-time license plate detection and recognition system using YOLOv10 and EasyOCR with a Flask web interface.
+Production-ready Flask application for license plate detection and OCR using `YOLO` and `EasyOCR`.
 
-## Features
+## Project Structure
 
-- **Real-time Detection**: Live webcam detection with optimized performance
-- **High Accuracy**: Enhanced OCR with multiple preprocessing techniques
-- **Web Interface**: User-friendly Flask web application
-- **Database Storage**: SQLite database for storing detected plates
-- **Multi-format Support**: Images and videos supported
-- **Fast Processing**: Optimized for real-time performance (~200ms per frame)
-
-## Performance
-
-- **Success Rate**: 66.7% on test images
-- **Processing Speed**: ~200ms average per frame
-- **Real-time FPS**: 4.8 theoretical FPS
-- **Accuracy**: High-quality OCR with confidence scoring
-
-## Installation
-
-1. **Clone the repository**
-```bash
-git clone <your-repo-url>
-cd License-Plate-Detection-System
+```text
+app.py                  WSGI entrypoint
+run.py                  Flask app factory
+src/                    Application code
+templates/              Web UI templates
+weights/best.pt         Detection model
+tests/                  Automated tests
+docker/                 Dockerfiles
+docker-compose.yml      Local production-style run
+render.yaml             Render deployment blueprint
 ```
 
-2. **Install dependencies**
-```bash
-pip install -r requirements.txt
+## What Was Cleaned Up
+
+- Removed legacy duplicate folders.
+- Removed obsolete helper files like old Gradio and legacy DB/config modules.
+- Kept one deployable Flask app path: `app.py` -> `run.py` -> `src/`.
+- Added Docker and Render-friendly runtime defaults.
+
+## Run Locally
+
+### Option 1: Python
+
+1. Create a virtual environment:
+
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
 ```
 
-3. **Run the application**
-```bash
-python app.py
+2. Install dependencies:
+
+```powershell
+pip install -r requirements-prod.txt
 ```
 
-4. **Access the web interface**
-Open your browser and go to `http://localhost:5000`
+3. Initialize folders and database:
 
-## Usage
-
-### Web Interface
-- **Home**: Upload images for detection
-- **Live Detection**: Real-time webcam detection
-- **Results**: View detection history and statistics
-
-### Webcam Detection
-- Adjustable confidence threshold (0.3-0.8)
-- Variable detection intervals (500-3000ms)
-- Real-time statistics and FPS counter
-- Auto-detection toggle
-
-### Standalone Script
-```bash
-python main.py
-```
-Choose from:
-1. Image file detection
-2. Video file detection  
-3. Webcam detection
-
-## Configuration
-
-### Detection Settings
-- **Confidence Threshold**: 0.5 (balanced speed/accuracy)
-- **Detection Interval**: 800ms (webcam)
-- **Image Processing**: 640px width for optimal speed
-- **OCR Quality**: Enhanced preprocessing pipeline
-
-### Database
-- SQLite database: `licensePlatesDatabase.db`
-- Automatic table creation
-- Stores: plate text, timestamps, detection metadata
-
-## API Endpoints
-
-- `POST /upload` - Upload image for detection
-- `POST /process_frame` - Process webcam frame
-- `GET /api/plates` - Get all detected plates
-- `DELETE /api/plates/<id>` - Delete specific plate
-
-## File Structure
-
-```
-├── app.py              # Main Flask application
-├── main.py             # Standalone detection script
-├── config.py           # Configuration settings
-├── sqldb.py            # Database utilities
-├── requirements.txt    # Python dependencies
-├── templates/          # HTML templates
-│   ├── index.html      # Home page
-│   ├── webcam.html     # Live detection
-│   └── results.html    # Results page
-├── data/               # Sample images/videos
-├── weights/            # Model weights
-│   └── best.pt         # Trained YOLOv10 model
-└── yolov10/           # YOLOv10 implementation
+```powershell
+python init_project.py
 ```
 
-## Technical Details
+4. Start the app:
 
-### Model
-- **Architecture**: YOLOv10 for object detection
-- **OCR Engine**: EasyOCR for text recognition
-- **Preprocessing**: Multiple enhancement techniques
-- **Validation**: Smart license plate format validation
+```powershell
+python run.py
+```
 
-### Optimizations
-- Frame resizing for faster processing
-- Simplified OCR pipeline for speed
-- Database operations skipped during live detection
-- Optimized confidence thresholds
+5. Open:
 
-## Requirements
+```text
+http://localhost:5000
+```
 
-- Python 3.8+
-- OpenCV 4.8+
-- PyTorch 2.0+
-- Flask 2.3+
-- EasyOCR 1.7+
-- Ultralytics 8.0+
+### Option 2: Docker
 
-## License
+```powershell
+docker-compose up -d --build
+```
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+Then open `http://localhost:5000`.
 
-## Contributing
+## Environment Variables
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
+Copy `.env.example` to `.env` and edit the important values:
 
-## Troubleshooting
+```text
+FLASK_ENV=production
+SECRET_KEY=change-this
+DATABASE_PATH=data/app.db
+MODEL_PATH=weights/best.pt
+MODEL_DEVICE=cpu
+```
 
-### Common Issues
-- **Low accuracy**: Ensure good lighting and clear license plates
-- **Slow processing**: Enable GPU acceleration if available
-- **Camera access**: Check browser permissions for webcam
-- **Model loading**: Verify `weights/best.pt` exists
+## Push To Your Existing GitHub Repo
 
-### Performance Tips
-- Use GPU for faster processing
-- Adjust confidence threshold based on your needs
-- Optimize detection intervals for your hardware
-- Ensure adequate lighting for better OCR results
+The repo already has a remote named `origin`.
+
+1. Review changes:
+
+```powershell
+git status
+```
+
+2. Stage everything:
+
+```powershell
+git add .
+```
+
+3. Commit:
+
+```powershell
+git commit -m "Clean project structure and add deployment setup"
+```
+
+4. Push to your existing repo:
+
+```powershell
+git push origin main
+```
+
+If your branch is not `main`, check it with:
+
+```powershell
+git branch --show-current
+```
+
+and push that branch instead.
+
+## Deploy To Render
+
+Best choice for this app: `Render Web Service` using `Docker`.
+
+### Why Docker on Render
+
+- This app needs system CV libraries.
+- PyTorch, EasyOCR, and OpenCV are easier to ship consistently in Docker.
+- The repo now includes `render.yaml` and a Docker-based startup path.
+
+### Steps
+
+1. Push this repo to GitHub.
+2. Sign in to Render.
+3. Click `New +` -> `Blueprint` or `Web Service`.
+4. Connect your GitHub repository.
+5. If using Blueprint, Render reads `render.yaml` automatically.
+6. If creating a Web Service manually:
+   - Runtime: `Docker`
+   - Dockerfile path: `docker/Dockerfile`
+   - Health check path: `/health`
+7. Add environment variables if needed:
+   - `SECRET_KEY`
+   - `MODEL_DEVICE=cpu`
+   - `PORT=10000`
+8. Deploy.
+
+### Important Render Notes
+
+- Render web services must bind to `0.0.0.0`.
+- Render commonly expects the app to listen on port `10000`.
+- Filesystem is ephemeral by default. If you want uploaded files or SQLite DB to persist across deploys, add a persistent disk and mount it at `/app/data` or `/app/uploads`.
+- For serious production usage, replace SQLite with PostgreSQL.
+
+## Health Check
+
+Use:
+
+```text
+/health
+```
+
+## Tests
+
+```powershell
+pytest -q
+```

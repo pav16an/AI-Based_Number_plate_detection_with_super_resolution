@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  # Development application with hot reload
+  app:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dev
+    container_name: license-plate-detection-dev
+    ports:
+      - "5000:5000"
+      - "8888:8888"
+    environment:
+      FLASK_ENV: development
+      FLASK_APP: run.py
+      SECRET_KEY: dev-secret-key
+      DATABASE_PATH: /app/data/app.db
+      MODEL_PATH: /app/weights/best.pt
+      LOG_LEVEL: DEBUG
+    volumes:
+      - .:/app
+      - /app/__pycache__
+    restart: unless-stopped
+    networks:
+      - app-network
+    command: flask run --host 0.0.0.0
+
+networks:
+  app-network:
+    driver: bridge

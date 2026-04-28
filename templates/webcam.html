@@ -347,6 +347,7 @@
         let processingFrame = false;
         let plateHistory = new Map(); // Track plates with timestamps
         let lastDetectionTime = 0;
+        let fpsInterval = null;
 
         const startBtn = document.getElementById('startBtn');
         const stopBtn = document.getElementById('stopBtn');
@@ -392,11 +393,7 @@
                     } 
                 });
                 videoElement.srcObject = stream;
-                
-                videoElement.addEventListener('loadedmetadata', () => {
-                    canvasElement.width = videoElement.videoWidth;
-                    canvasElement.height = videoElement.videoHeight;
-                });
+                syncCanvasToVideo();
 
                 startBtn.disabled = true;
                 stopBtn.disabled = false;
@@ -425,6 +422,11 @@
             if (detectionInterval) {
                 clearInterval(detectionInterval);
                 detectionInterval = null;
+            }
+
+            if (fpsInterval) {
+                clearInterval(fpsInterval);
+                fpsInterval = null;
             }
             
             videoElement.srcObject = null;
@@ -461,10 +463,7 @@
                     });
                     
                     videoElement.srcObject = stream;
-                    videoElement.addEventListener('loadedmetadata', () => {
-                        canvasElement.width = videoElement.videoWidth;
-                        canvasElement.height = videoElement.videoHeight;
-                    });
+                    syncCanvasToVideo();
                     
                 } catch (err) {
                     console.error('Error switching camera:', err);
@@ -476,6 +475,10 @@
 
         function startDetection() {
             if (!document.getElementById('continuousDetection').checked) return;
+
+            if (detectionInterval) {
+                clearInterval(detectionInterval);
+            }
             
             const interval = parseInt(intervalSlider.value);
             detectionInterval = setInterval(() => {
@@ -493,13 +496,29 @@
         }
 
         function startFPSCounter() {
-            setInterval(() => {
+            if (fpsInterval) {
+                clearInterval(fpsInterval);
+            }
+
+            fpsInterval = setInterval(() => {
                 const now = Date.now();
                 const fps = Math.round(frameCount * 1000 / (now - lastFrameTime));
                 document.getElementById('fps').textContent = fps;
                 frameCount = 0;
                 lastFrameTime = now;
             }, 1000);
+        }
+
+        function syncCanvasToVideo() {
+            const applyDimensions = () => {
+                if (!videoElement.videoWidth || !videoElement.videoHeight) return;
+                canvasElement.width = videoElement.videoWidth;
+                canvasElement.height = videoElement.videoHeight;
+            };
+
+            videoElement.addEventListener('loadedmetadata', applyDimensions, { once: true });
+            videoElement.addEventListener('loadeddata', applyDimensions, { once: true });
+            requestAnimationFrame(applyDimensions);
         }
 
         function captureAndProcess() {
@@ -552,11 +571,13 @@
                     }
                 } else {
                     console.error('Processing failed:', data.error);
+                    ctx.clearRect(0, 0, canvasElement.width, canvasElement.height);
                 }
             })
             .catch(error => {
                 processingFrame = false;
                 console.error('Error processing frame:', error);
+                ctx.clearRect(0, 0, canvasElement.width, canvasElement.height);
             });
         }
 

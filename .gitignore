@@ -48,6 +48,44 @@ json/
 *.swp
 *.swo
 
+# Environment
+.env
+.env.local
+.env*.local
+
+# Logs
+logs/
+*.log
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Legacy files
+ai-based-number-plate-detection/
+AI-Based_Number_plate_detection_with_super_resolution/
+app_gradio.py
+main.py
+sqldb.py
+README_HF.md
+requirements_hf.txt
+
+# Testing
+.tox/
+.coverage
+.coverage.*
+.pytest_cache/
+htmlcov/
+
+# Generated files
+htmlcov/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Jupyter
+.ipynb_checkpoints/
+
 # OS
 .DS_Store
 Thumbs.db

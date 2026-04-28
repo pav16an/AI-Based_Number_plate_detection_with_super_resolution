@@ -1,0 +1,37 @@
+# Development Dockerfile with debugging tools
+
+FROM python:3.10
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libgomp1 \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements
+COPY requirements-dev.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements-dev.txt
+
+# Copy application
+COPY . .
+
+# Create required directories
+RUN mkdir -p logs uploads data
+
+# Set environment variables
+ENV FLASK_ENV=development
+ENV PYTHONUNBUFFERED=1
+
+# Expose ports
+EXPOSE 5000 8888
+
+# Run with Flask development server
+CMD ["python", "-m", "flask", "run", "--host", "0.0.0.0"]

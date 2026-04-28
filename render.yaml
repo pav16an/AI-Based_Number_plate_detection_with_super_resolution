@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: license-plate-detection
+    runtime: docker
+    plan: starter
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: DEBUG
+        value: "False"
+      - key: HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: "10000"
+      - key: WORKERS
+        value: "2"
+      - key: DATABASE_PATH
+        value: /app/data/app.db
+      - key: MODEL_PATH
+        value: /app/weights/best.pt
+      - key: MODEL_DEVICE
+        value: cpu
+      - key: OCR_USE_GPU
+        value: "False"
+      - key: LOG_LEVEL
+        value: INFO
+      - key: SESSION_COOKIE_SECURE
+        value: "True"
+      - key: SECRET_KEY
+        generateValue: true
