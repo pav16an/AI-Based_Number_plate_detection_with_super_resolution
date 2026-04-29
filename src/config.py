@@ -22,15 +22,17 @@ class Config:
     
     # Upload settings
     UPLOAD_FOLDER = os.environ.get('UPLOAD_FOLDER', str(BASE_DIR / 'uploads'))
-    MAX_CONTENT_LENGTH = int(os.environ.get('MAX_CONTENT_LENGTH', 16 * 1024 * 1024))  # 16MB
-    ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'mp4', 'avi', 'mov'}
+    MAX_CONTENT_LENGTH = int(os.environ.get('MAX_CONTENT_LENGTH', 200 * 1024 * 1024))  # 200MB (supports video)
+    ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'mp4', 'avi', 'mov', 'mkv', 'webm'}
+    VIDEO_EXTENSIONS = {'mp4', 'avi', 'mov', 'mkv', 'webm'}
+    VIDEO_MAX_FRAMES = int(os.environ.get('VIDEO_MAX_FRAMES', 60))  # Max frames to sample per video
     
     # Database settings
     DATABASE_PATH = os.environ.get('DATABASE_PATH', str(BASE_DIR / 'data' / 'app.db'))
     DATABASE_URL = os.environ.get('DATABASE_URL', f'sqlite:///{DATABASE_PATH}')
     
     # Model settings
-    MODEL_PATH = os.environ.get('MODEL_PATH', str(BASE_DIR / 'weights' / 'best.pt'))
+    MODEL_PATH = os.environ.get('MODEL_PATH', str(BASE_DIR / 'weights' / 'yolov10-license-plate.pt'))
     FALLBACK_MODEL = 'yolov8n.pt'
     DEFAULT_CONFIDENCE = float(os.environ.get('DEFAULT_CONFIDENCE', 0.35))
     MODEL_DEVICE = os.environ.get('MODEL_DEVICE', 'cpu')  # 'cpu' or 'cuda'

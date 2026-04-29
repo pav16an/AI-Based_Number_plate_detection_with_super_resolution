@@ -10,6 +10,11 @@ from src.utils import LicensePlateValidator
 
 logger = logging.getLogger(__name__)
 
+# Fix for Pillow >= 10.0.0 breaking EasyOCR
+import PIL.Image
+if not hasattr(PIL.Image, 'ANTIALIAS'):
+    PIL.Image.ANTIALIAS = getattr(PIL.Image, "Resampling", PIL.Image).LANCZOS
+
 
 def _import_cv2():
     """Import cv2 lazily so the app can boot without CV dependencies."""
@@ -27,6 +32,210 @@ def _import_numpy():
     except ModuleNotFoundError as exc:
         raise RuntimeError("NumPy is required for detection features") from exc
     return np
+
+
+def _register_ultralytics_compatibility_shims() -> None:
+    """Register compatibility shims for checkpoints trained with other Ultralytics builds."""
+    import torch
+    import torch.nn as nn
+    from ultralytics.nn import tasks as ultralytics_tasks
+    from ultralytics.nn.modules import block as ultralytics_block
+
+    # ── 1. YOLOv10DetectionModel alias ───────────────────────────────────────
+    if not hasattr(ultralytics_tasks, 'YOLOv10DetectionModel') and hasattr(ultralytics_tasks, 'DetectionModel'):
+        ultralytics_tasks.YOLOv10DetectionModel = ultralytics_tasks.DetectionModel
+        logger.info("Registered YOLOv10DetectionModel compatibility alias")
+
+    Conv = ultralytics_block.Conv
+
+    # ── 2. SCDown ─────────────────────────────────────────────────────────────
+    if not hasattr(ultralytics_block, 'SCDown'):
+        class SCDown(nn.Module):
+            """Spatial-Channel Downsample (YOLOv10)."""
+            def __init__(self, c1: int, c2: int, k: int = 3, s: int = 2, *args, **kwargs):
+                super().__init__()
+                self.cv1 = Conv(c1, c2, 1, 1)
+                self.cv2 = Conv(c2, c2, k, s, g=c2, act=False)
+
+            def forward(self, x):
+                return self.cv2(self.cv1(x))
+
+        ultralytics_block.SCDown = SCDown
+        logger.info("Registered SCDown compatibility shim")
+
+    # ── 3. Attention (needed by PSA) ──────────────────────────────────────────
+    if not hasattr(ultralytics_block, 'Attention'):
+        class Attention(nn.Module):
+            """Multi-head self-attention used inside PSA (YOLOv10)."""
+            def __init__(self, dim: int, num_heads: int = 8, attn_ratio: float = 0.5):
+                super().__init__()
+                self.num_heads = num_heads
+                self.head_dim = dim // num_heads
+                self.key_dim = int(self.head_dim * attn_ratio)
+                self.scale = self.key_dim ** -0.5
+                nh_kd = self.key_dim * num_heads
+                h = dim + nh_kd * 2
+                self.qkv = Conv(dim, h, 1, act=False)
+                self.proj = Conv(dim, dim, 1, act=False)
+                self.pe = Conv(dim, dim, 3, 1, g=dim, act=False)
+
+            def forward(self, x):
+                B, C, H, W = x.shape
+                N = H * W
+                qkv = self.qkv(x)
+                q, k, v = qkv.view(B, self.num_heads, self.key_dim * 2 + self.head_dim, N).split(
+                    [self.key_dim, self.key_dim, self.head_dim], dim=2
+                )
+                attn = (q.transpose(-2, -1) @ k) * self.scale
+                attn = attn.softmax(dim=-1)
+                x = (v @ attn.transpose(-2, -1)).view(B, C, H, W) + self.pe(v.reshape(B, C, H, W))
+                return self.proj(x)
+
+        ultralytics_block.Attention = Attention
+        logger.info("Registered Attention compatibility shim")
+
+    # ── 4. PSA (Partial Self-Attention) ───────────────────────────────────────
+    if not hasattr(ultralytics_block, 'PSA'):
+        _Attention = ultralytics_block.Attention
+
+        class PSA(nn.Module):
+            """Partial Self-Attention block (YOLOv10)."""
+            def __init__(self, c1: int, c2: int, e: float = 0.5):
+                super().__init__()
+                assert c1 == c2
+                self.c = int(c1 * e)
+                self.cv1 = Conv(c1, 2 * self.c, 1, 1)
+                self.cv2 = Conv(2 * self.c, c1, 1)
+                self.attn = _Attention(self.c, attn_ratio=0.5, num_heads=max(1, self.c // 64))
+                self.ffn = nn.Sequential(
+                    Conv(self.c, self.c * 2, 1),
+                    Conv(self.c * 2, self.c, 1, act=False),
+                )
+
+            def forward(self, x):
+                a, b = self.cv1(x).split((self.c, self.c), dim=1)
+                b = b + self.attn(b)
+                b = b + self.ffn(b)
+                return self.cv2(torch.cat((a, b), 1))
+
+        ultralytics_block.PSA = PSA
+        logger.info("Registered PSA compatibility shim")
+
+    # ── 5. CIB (Compact Inverted Block) ───────────────────────────────────────
+    if not hasattr(ultralytics_block, 'CIB'):
+        class CIB(nn.Module):
+            """Compact Inverted Block (YOLOv10)."""
+            def __init__(self, c1: int, c2: int, shortcut: bool = True,
+                         e: float = 0.5, lk: bool = False):
+                super().__init__()
+                c_ = int(c2 * e)
+                self.cv1 = nn.Sequential(
+                    Conv(c1, c1, 3, g=c1),
+                    Conv(c1, 2 * c_, 1),
+                    Conv(2 * c_, 2 * c_, 3, g=2 * c_) if not lk else Conv(2 * c_, 2 * c_, 3, g=2 * c_),
+                    Conv(2 * c_, c2, 1),
+                    Conv(c2, c2, 3, g=c2),
+                )
+                self.add = shortcut and c1 == c2
+
+            def forward(self, x):
+                return x + self.cv1(x) if self.add else self.cv1(x)
+
+        ultralytics_block.CIB = CIB
+        logger.info("Registered CIB compatibility shim")
+
+    # ── 6. C2fCIB ─────────────────────────────────────────────────────────────
+    if not hasattr(ultralytics_block, 'C2fCIB') and hasattr(ultralytics_block, 'C2f'):
+        _C2f = ultralytics_block.C2f
+        _CIB = ultralytics_block.CIB
+
+        class C2fCIB(_C2f):
+            """C2f with CIB bottleneck (YOLOv10)."""
+            def __init__(self, c1: int, c2: int, n: int = 1,
+                         shortcut: bool = False, lk: bool = False,
+                         g: int = 1, e: float = 0.5):
+                super().__init__(c1, c2, n, shortcut, g, e)
+                self.m = nn.ModuleList(
+                    _CIB(self.c, self.c, shortcut, e=1.0, lk=lk) for _ in range(n)
+                )
+
+        ultralytics_block.C2fCIB = C2fCIB
+        logger.info("Registered C2fCIB compatibility shim")
+
+    # ── 7. RepVGGDW ───────────────────────────────────────────────────────────
+    if not hasattr(ultralytics_block, 'RepVGGDW'):
+        class RepVGGDW(nn.Module):
+            """Reparameterizable VGG-style depthwise conv block (YOLOv10)."""
+            def __init__(self, ed: int):
+                super().__init__()
+                self.conv = Conv(ed, ed, 7, 1, 3, g=ed, act=False)
+                self.conv1 = Conv(ed, ed, 3, 1, 1, g=ed, act=False)
+                self.dim = ed
+                self.act = nn.SiLU()
+
+            def forward(self, x):
+                return self.act(self.conv(x) + self.conv1(x))
+
+            def forward_fuse(self, x):
+                return self.act(self.conv(x))
+
+        ultralytics_block.RepVGGDW = RepVGGDW
+        logger.info("Registered RepVGGDW compatibility shim")
+
+    # ── 8. v10Detect head ─────────────────────────────────────────────────────
+    try:
+        from ultralytics.nn.modules import head as ultralytics_head
+        if not hasattr(ultralytics_head, 'v10Detect') and hasattr(ultralytics_head, 'Detect'):
+            _Detect = ultralytics_head.Detect
+
+            class v10Detect(_Detect):
+                """YOLOv10 dual-assignment detection head compatibility shim."""
+                max_det: int = 300
+
+                def __init__(self, nc: int = 80, ch: tuple = ()):
+                    super().__init__(nc, ch)
+                    c2 = max(ch[0] // 4, self.reg_max * 4, 16) if ch else 16
+                    c3 = max(ch[0], min(self.nc, 100)) if ch else 100
+                    self.one2one_cv2 = nn.ModuleList(
+                        nn.Sequential(Conv(x, c2, 3), Conv(c2, c2, 3),
+                                      nn.Conv2d(c2, 4 * self.reg_max, 1)) for x in ch
+                    )
+                    self.one2one_cv3 = nn.ModuleList(
+                        nn.Sequential(Conv(x, c3, 3), Conv(c3, c3, 3),
+                                      nn.Conv2d(c3, self.nc, 1)) for x in ch
+                    )
+
+            ultralytics_head.v10Detect = v10Detect
+            # Also expose via tasks module so pickle finds it
+            ultralytics_tasks.v10Detect = v10Detect
+            logger.info("Registered v10Detect compatibility shim")
+    except Exception as _shim_exc:
+        logger.debug("Could not register v10Detect shim: %s", _shim_exc)
+
+    # ── 9. v10DetectLoss (stored in checkpoint's loss attribute) ──────────────
+    try:
+        from ultralytics.utils import loss as ultralytics_loss
+        if not hasattr(ultralytics_loss, 'v10DetectLoss'):
+            _E2EDetectLoss = getattr(ultralytics_loss, 'E2EDetectLoss', None)
+            _v8DetectionLoss = getattr(ultralytics_loss, 'v8DetectionLoss', None)
+            _base = _E2EDetectLoss or _v8DetectionLoss
+            if _base is not None:
+                class v10DetectLoss(_base):
+                    """YOLOv10 detection loss compatibility shim."""
+                    pass
+            else:
+                import torch.nn as _nn
+                class v10DetectLoss(_nn.Module):
+                    """Minimal v10DetectLoss placeholder for checkpoint loading."""
+                    def __init__(self, *args, **kwargs):
+                        super().__init__()
+                    def forward(self, *args, **kwargs):
+                        raise NotImplementedError("v10DetectLoss is a compatibility shim.")
+
+            ultralytics_loss.v10DetectLoss = v10DetectLoss
+            logger.info("Registered v10DetectLoss compatibility shim")
+    except Exception as _shim_exc:
+        logger.debug("Could not register v10DetectLoss shim: %s", _shim_exc)
 
 
 class ModelLoader(ABC):
@@ -65,14 +274,7 @@ class YOLODetector(ModelLoader):
         """Load YOLO model"""
         try:
             from ultralytics import YOLO
-            from ultralytics.nn import tasks as ultralytics_tasks
-
-            # Compatibility shim for weights saved from YOLOv10-based training code.
-            # Some checkpoints reference YOLOv10DetectionModel during deserialization,
-            # while newer or different Ultralytics builds only expose DetectionModel.
-            if not hasattr(ultralytics_tasks, 'YOLOv10DetectionModel') and hasattr(ultralytics_tasks, 'DetectionModel'):
-                ultralytics_tasks.YOLOv10DetectionModel = ultralytics_tasks.DetectionModel
-                logger.info("Registered YOLOv10DetectionModel compatibility alias")
+            _register_ultralytics_compatibility_shims()
             
             # Try to load custom model
             if os.path.exists(self.model_path):
@@ -86,7 +288,7 @@ class YOLODetector(ModelLoader):
             # Fuse layers for faster and slightly more accurate inference if available
             if hasattr(self.model, 'fuse'):
                 try:
-                    self.model = self.model.fuse()
+                    self.model.fuse()
                     logger.debug("Fused YOLO model layers for optimized inference")
                 except Exception:
                     logger.debug("YOLO model fusion not available")
@@ -220,18 +422,22 @@ class OCREngine(ModelLoader):
             logger.error(f"Error during OCR: {e}")
             return ""
     
-    def recognize_with_confidence(self, image: Any) -> Tuple[str, float]:
+    def recognize_with_confidence(self, image: Any, fast_mode: bool = False) -> Tuple[str, float]:
         """
         Recognize text with confidence score from multiple OCR variants
         
         Args:
             image: Input image
+            fast_mode: If True, do not generate multiple OCR variants
             
         Returns:
             Tuple of (text, confidence)
         """
         try:
-            candidates = [image] + ImagePreprocessor.generate_ocr_variants(image)
+            if fast_mode:
+                candidates = [image]
+            else:
+                candidates = [image] + ImagePreprocessor.generate_ocr_variants(image)
             candidate_scores = defaultdict(float)
             candidate_confidences: Dict[str, float] = {}
             
@@ -395,11 +601,52 @@ class ImagePreprocessor:
             # Inverted threshold can help when the plate is dark-on-light or backlit
             inverted = cv2.bitwise_not(ImagePreprocessor.preprocess_for_ocr(gray, target_height=72))
             variants.append(inverted)
+
+            # Morphological Closing to connect fragmented text (rain/motion blur)
+            kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+            closing = cv2.morphologyEx(gray, cv2.MORPH_CLOSE, kernel_close)
+            variants.append(ImagePreprocessor.preprocess_for_ocr(closing, target_height=64))
         except Exception as e:
             logger.error(f"Error generating OCR variants: {e}")
         
         return variants
     
+    @staticmethod
+    def gamma_correction(image: Any, gamma: float = 1.0) -> Any:
+        """Apply gamma correction for dark/night images"""
+        try:
+            cv2 = _import_cv2()
+            import numpy as np
+            invGamma = 1.0 / gamma
+            table = np.array([((i / 255.0) ** invGamma) * 255 for i in np.arange(0, 256)]).astype("uint8")
+            return cv2.LUT(image, table)
+        except Exception as e:
+            from src.utils.logger import get_logger
+            logger = get_logger(__name__)
+            logger.error(f"Error applying gamma correction: {e}")
+            return image
+
+    @staticmethod
+    def apply_clahe(image: Any) -> Any:
+        """Apply CLAHE to handle fog/rain washout conditions"""
+        try:
+            cv2 = _import_cv2()
+            if len(image.shape) == 3:
+                lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
+                l_channel, a, b = cv2.split(lab)
+                clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+                cl = clahe.apply(l_channel)
+                limg = cv2.merge((cl, a, b))
+                return cv2.cvtColor(limg, cv2.COLOR_LAB2BGR)
+            else:
+                clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+                return clahe.apply(image)
+        except Exception as e:
+            from src.utils.logger import get_logger
+            logger = get_logger(__name__)
+            logger.error(f"Error applying CLAHE: {e}")
+            return image
+
     @staticmethod
     def enhance_contrast(image: Any, alpha: float = 1.5, 
                         beta: int = 50) -> Any:
@@ -513,24 +760,37 @@ class DetectionService:
             deduped.append(detection)
         return deduped
 
-    def _run_detection_passes(self, image: Any, conf: Optional[float] = None) -> List[Dict]:
+    def _run_detection_passes(self, image: Any, conf: Optional[float] = None, fast_mode: bool = False) -> List[Dict]:
         """
         Run multiple detector passes to recover small or low-contrast plates.
         """
         base_conf = conf if conf is not None else getattr(self.detector, 'confidence', 0.6)
-        detections = self.detector.predict(image, base_conf)
-        if detections:
-            return detections
+        
+        all_detections: List[Dict] = []
+        
+        # Initial pass
+        initial_detections = self.detector.predict(image, base_conf)
+        if initial_detections:
+            all_detections.extend(initial_detections)
+
+        # Fallback passes are mainly for recovering missed small or low-contrast plates.
+        if initial_detections:
+            return self._deduplicate_detections(all_detections)
+            
+        if fast_mode:
+            return self._deduplicate_detections(all_detections)
 
         try:
             cv2 = _import_cv2()
         except RuntimeError:
-            return detections
+            return self._deduplicate_detections(all_detections)
 
         h, w = image.shape[:2]
         retries: List[Tuple[Any, float, int, int, float]] = []
 
         lower_conf = max(0.25, base_conf - 0.15)
+        
+        # Full image lower conf
         retries.append((image, lower_conf, 0, 0, 1.0))
 
         # Upscale the whole image for small plate recovery.
@@ -540,17 +800,25 @@ class DetectionService:
         # Contrast-enhanced retry can recover low-contrast or dim plates.
         enhanced = ImagePreprocessor.enhance_contrast(image, alpha=1.35, beta=18)
         retries.append((enhanced, lower_conf, 0, 0, 1.0))
+        
+        # Gamma correction pass for extremely dark/night images
+        gamma_corrected = ImagePreprocessor.gamma_correction(image, gamma=1.5)
+        retries.append((gamma_corrected, lower_conf, 0, 0, 1.0))
+        
+        # CLAHE pass for foggy/rainy/washed-out conditions
+        clahe_enhanced = ImagePreprocessor.apply_clahe(image)
+        retries.append((clahe_enhanced, lower_conf, 0, 0, 1.0))
 
-        # Focus on the lower-center region where front/rear plates usually appear.
-        crop_y1 = int(h * 0.35)
-        crop_x1 = int(w * 0.10)
-        crop = image[crop_y1:h, crop_x1:int(w * 0.90)]
-        if crop.size > 0:
-            retries.append((crop, lower_conf, crop_x1, crop_y1, 1.0))
-            crop_upscaled = cv2.resize(crop, (crop.shape[1] * 2, crop.shape[0] * 2), interpolation=cv2.INTER_CUBIC)
-            retries.append((crop_upscaled, lower_conf, crop_x1, crop_y1, 2.0))
+        if not initial_detections:
+            # Focus on the lower-center region when the first pass misses a plate.
+            crop_y1 = int(h * 0.35)
+            crop_x1 = int(w * 0.10)
+            crop = image[crop_y1:h, crop_x1:int(w * 0.90)]
+            if crop.size > 0:
+                retries.append((crop, lower_conf, crop_x1, crop_y1, 1.0))
+                crop_upscaled = cv2.resize(crop, (crop.shape[1] * 2, crop.shape[0] * 2), interpolation=cv2.INTER_CUBIC)
+                retries.append((crop_upscaled, lower_conf, crop_x1, crop_y1, 2.0))
 
-        all_detections: List[Dict] = []
         for retry_image, retry_conf, offset_x, offset_y, scale in retries:
             retry_detections = self.detector.predict(retry_image, retry_conf)
             for detection in retry_detections:
@@ -567,24 +835,35 @@ class DetectionService:
                 all_detections.append(mapped)
 
         if all_detections:
-            self.logger.info("Recovered %s detections from fallback passes", len(all_detections))
+            self.logger.info(f"Accumulated {len(all_detections)} raw detections across passes")
 
         return self._deduplicate_detections(all_detections)
+
+    def _recognize_plate_text(self, roi: Any, fast_mode: bool = False) -> Tuple[str, float]:
+        """Call OCR with backward compatibility for older test doubles."""
+        try:
+            return self.ocr.recognize_with_confidence(roi, fast_mode=fast_mode)
+        except TypeError as exc:
+            if "fast_mode" not in str(exc):
+                raise
+            return self.ocr.recognize_with_confidence(roi)
     
     def detect_and_recognize(self, image: Any, 
-                           conf: Optional[float] = None) -> List[Dict]:
+                           conf: Optional[float] = None,
+                           fast_mode: bool = False) -> List[Dict]:
         """
         Detect and recognize license plates in image
         
         Args:
             image: Input image
             conf: Confidence threshold for detection
+            fast_mode: If True, skip heavy fallback detection and OCR variants
             
         Returns:
             List of detections with recognized text
         """
         try:
-            detections = self._run_detection_passes(image, conf)
+            detections = self._run_detection_passes(image, conf, fast_mode=fast_mode)
             
             if not detections:
                 self.logger.debug("No license plates detected")
@@ -608,8 +887,8 @@ class DetectionService:
                 if roi is None or roi.size == 0:
                     continue
                 
-                # Recognize text using multiple OCR variants
-                text, ocr_confidence = self.ocr.recognize_with_confidence(roi)
+                # Recognize text using multiple OCR variants (if not fast_mode)
+                text, ocr_confidence = self._recognize_plate_text(roi, fast_mode=fast_mode)
 
                 # Keep the detection even when OCR is uncertain so realtime mode
                 # still shows bounding boxes around detected plates.

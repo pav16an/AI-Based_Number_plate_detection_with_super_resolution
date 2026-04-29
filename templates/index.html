@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>License Plate Detection System</title>
+    <meta name="description" content="AI-powered license plate detection using YOLOv10 and EasyOCR. Upload images or videos to detect and read license plates instantly.">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
@@ -11,292 +12,284 @@
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            padding: 0;
-            margin: 0;
-            overflow-x: hidden;
-        }
-        .main-container {
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 20px;
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
-            backdrop-filter: blur(10px);
-            margin: 1rem;
-            padding: 1rem;
-        }
-        @media (min-width: 768px) {
-            .main-container {
-                margin: 2rem auto;
-                padding: 2rem;
-            }
-        }
-        .hero-section {
-            text-align: center;
-            margin-bottom: 3rem;
-        }
-        .hero-title {
-            color: #2c3e50;
-            font-size: 1.8rem;
-            font-weight: 700;
-            margin-bottom: 1rem;
-            text-align: center;
-        }
-        @media (min-width: 768px) {
-            .hero-title {
-                font-size: 2.5rem;
-            }
-        }
-        .hero-subtitle {
-            color: #7f8c8d;
-            font-size: 1.2rem;
-            margin-bottom: 2rem;
-        }
-        .feature-card {
-            background: white;
-            border-radius: 15px;
-            padding: 1rem;
-            margin-bottom: 1rem;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
-            transition: transform 0.3s ease, box-shadow 0.3s ease;
-            border: none;
-        }
-        @media (min-width: 768px) {
-            .feature-card {
-                padding: 2rem;
-                margin-bottom: 2rem;
-            }
-        }
-        .feature-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
-        }
-        .feature-icon {
-            font-size: 3rem;
-            color: #3498db;
-            margin-bottom: 1rem;
-        }
-        .feature-title {
-            color: #2c3e50;
-            font-size: 1.5rem;
-            font-weight: 600;
-            margin-bottom: 1rem;
-        }
-        .feature-description {
-            color: #7f8c8d;
-            line-height: 1.6;
-        }
-        .upload-area {
-            border: 2px dashed #3498db;
-            border-radius: 15px;
-            padding: 1.5rem;
-            text-align: center;
-            background: #f8f9fa;
-            transition: all 0.3s ease;
-            cursor: pointer;
-        }
-        @media (min-width: 768px) {
-            .upload-area {
-                padding: 3rem;
-            }
-        }
-        .upload-area:hover {
-            border-color: #2980b9;
-            background: #e3f2fd;
-        }
-        .upload-area.dragover {
-            border-color: #27ae60;
-            background: #e8f5e8;
-        }
-        .upload-icon {
-            font-size: 2.5rem;
-            color: #3498db;
-            margin-bottom: 1rem;
-        }
-        @media (min-width: 768px) {
-            .upload-icon {
-                font-size: 4rem;
-            }
-        }
-        .btn-primary {
-            background: linear-gradient(45deg, #3498db, #2980b9);
-            border: none;
-            border-radius: 25px;
-            padding: 12px 30px;
-            font-weight: 600;
-            transition: all 0.3s ease;
-        }
-        .btn-primary:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 20px rgba(52, 152, 219, 0.3);
-        }
-        .btn-success {
-            background: linear-gradient(45deg, #27ae60, #2ecc71);
-            border: none;
-            border-radius: 25px;
-            padding: 12px 30px;
-            font-weight: 600;
-            transition: all 0.3s ease;
-        }
-        .btn-success:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 20px rgba(39, 174, 96, 0.3);
-        }
-        .result-section {
-            display: none;
-            margin-top: 2rem;
-        }
-        .result-image {
-            max-width: 100%;
-            border-radius: 10px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
-        }
-        .license-plate-list {
-            background: #f8f9fa;
-            border-radius: 10px;
-            padding: 1rem;
-            margin-top: 1rem;
-        }
-        .loading {
-            display: none;
-            text-align: center;
-            margin: 2rem 0;
-        }
-        .spinner-border {
-            color: #3498db;
+            padding: 0; margin: 0;
         }
         .navbar {
-            background: rgba(255, 255, 255, 0.95) !important;
+            background: rgba(255,255,255,0.95) !important;
             backdrop-filter: blur(10px);
         }
-        .navbar-brand {
-            font-weight: 700;
-            color: #2c3e50 !important;
+        .navbar-brand { font-weight: 700; color: #2c3e50 !important; }
+        .nav-link { color: #7f8c8d !important; font-weight: 500; transition: color .3s; }
+        .nav-link:hover { color: #3498db !important; }
+        .main-container {
+            background: rgba(255,255,255,0.97);
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.15);
+            margin: 1.5rem auto;
+            padding: 2rem;
         }
-        .nav-link {
-            color: #7f8c8d !important;
-            font-weight: 500;
-            transition: color 0.3s ease;
+        .hero-title { color: #2c3e50; font-size: clamp(1.6rem, 4vw, 2.5rem); font-weight: 700; }
+        .hero-subtitle { color: #7f8c8d; font-size: 1.1rem; }
+
+        /* Feature cards */
+        .feature-card {
+            background: white; border-radius: 15px; padding: 1.5rem;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.08);
+            transition: transform .3s, box-shadow .3s; border: none; height: 100%;
         }
-        .nav-link:hover {
-            color: #3498db !important;
+        .feature-card:hover { transform: translateY(-5px); box-shadow: 0 18px 40px rgba(0,0,0,0.13); }
+        .feature-icon { font-size: 2.5rem; margin-bottom: .8rem; }
+
+        /* Upload tabs */
+        .upload-tabs { border-bottom: none; margin-bottom: 1.5rem; gap: .5rem; }
+        .upload-tabs .nav-link {
+            border-radius: 12px !important; border: 2px solid #e0e0e0;
+            color: #7f8c8d; font-weight: 600; padding: .7rem 1.6rem;
+            transition: all .25s; background: #f8f9fa;
         }
+        .upload-tabs .nav-link:hover { border-color: #3498db; color: #3498db; background: #e8f4fd; }
+        .upload-tabs .nav-link.active {
+            background: linear-gradient(135deg, #3498db, #2980b9) !important;
+            border-color: transparent !important; color: white !important;
+            box-shadow: 0 6px 18px rgba(52,152,219,.35);
+        }
+
+        /* Drop zone */
+        .upload-area {
+            border: 2px dashed #3498db; border-radius: 15px;
+            padding: 2.5rem 1.5rem; text-align: center; background: #f8faff;
+            transition: all .3s; cursor: pointer; position: relative;
+        }
+        .upload-area:hover, .upload-area.dragover {
+            border-color: #2980b9; background: #e8f4fd; transform: scale(1.01);
+        }
+        .upload-area input[type=file] { display: none; }
+        .upload-icon { font-size: 3.5rem; color: #3498db; margin-bottom: .8rem; }
+
+        /* Video-specific drop zone */
+        .upload-area.video-zone { border-color: #8e44ad; background: #f9f4ff; }
+        .upload-area.video-zone:hover, .upload-area.video-zone.dragover {
+            border-color: #6c3483; background: #f0e8ff;
+        }
+        .upload-area.video-zone .upload-icon { color: #8e44ad; }
+
+        /* Buttons */
+        .btn-upload-img {
+            background: linear-gradient(45deg, #3498db, #2980b9); border: none;
+            border-radius: 25px; padding: 10px 28px; font-weight: 600; color: white; transition: all .3s;
+        }
+        .btn-upload-img:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(52,152,219,.4); color: white; }
+        .btn-upload-vid {
+            background: linear-gradient(45deg, #8e44ad, #6c3483); border: none;
+            border-radius: 25px; padding: 10px 28px; font-weight: 600; color: white; transition: all .3s;
+        }
+        .btn-upload-vid:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(142,68,173,.4); color: white; }
+
+        /* Results */
+        .result-section { display: none; margin-top: 1.5rem; }
+        .result-image { max-width: 100%; border-radius: 12px; box-shadow: 0 8px 25px rgba(0,0,0,0.12); }
+        .plate-badge {
+            display: inline-block; font-family: monospace; font-size: 1.1rem; font-weight: 700;
+            padding: .5rem 1.2rem; border-radius: 8px; margin: .3rem; background: #e8f5e8;
+            border: 2px solid #27ae60; color: #27ae60; letter-spacing: 1px;
+        }
+        .plate-badge.video { background: #f3e8ff; border-color: #8e44ad; color: #8e44ad; }
+        .loading { display: none; text-align: center; padding: 2rem 0; }
+        .progress-wrap { margin: 1rem 0; }
+
+        /* Video stats bar */
+        .vid-stats {
+            display: flex; gap: 1rem; flex-wrap: wrap;
+            background: #f8f9fa; border-radius: 12px; padding: 1rem 1.5rem; margin-bottom: 1rem;
+        }
+        .vid-stat { text-align: center; flex: 1; min-width: 80px; }
+        .vid-stat-num { font-size: 1.4rem; font-weight: 700; color: #8e44ad; }
+        .vid-stat-lbl { font-size: .78rem; color: #7f8c8d; text-transform: uppercase; letter-spacing: .5px; }
+
+        /* Timeline events */
+        .timeline-item {
+            display: flex; align-items: center; gap: .8rem;
+            padding: .5rem .8rem; border-radius: 8px; margin-bottom: .4rem;
+            background: #f8f9fa; border-left: 3px solid #8e44ad; font-size: .9rem;
+        }
+        .timeline-ts { font-size: .78rem; color: #7f8c8d; min-width: 55px; }
+        .timeline-plate { font-family: monospace; font-weight: 700; color: #8e44ad; }
     </style>
 </head>
 <body>
-    <!-- Navigation -->
     <nav class="navbar navbar-expand-lg navbar-light fixed-top">
         <div class="container">
-            <a class="navbar-brand" href="/">
-                <i class="fas fa-car me-2"></i>License Plate Detection
-            </a>
+            <a class="navbar-brand" href="/"><i class="fas fa-car me-2"></i>License Plate Detection</a>
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
                 <span class="navbar-toggler-icon"></span>
             </button>
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav ms-auto">
-                    <li class="nav-item">
-                        <a class="nav-link" href="/"><i class="fas fa-home me-1"></i>Home</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="/webcam"><i class="fas fa-video me-1"></i>Live Detection</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="/results"><i class="fas fa-chart-bar me-1"></i>Results</a>
-                    </li>
+                    <li class="nav-item"><a class="nav-link active" href="/"><i class="fas fa-home me-1"></i>Home</a></li>
+                    <li class="nav-item"><a class="nav-link" href="/webcam"><i class="fas fa-video me-1"></i>Live Detection</a></li>
+                    <li class="nav-item"><a class="nav-link" href="/results"><i class="fas fa-chart-bar me-1"></i>Results</a></li>
                 </ul>
             </div>
         </div>
     </nav>
 
-    <div class="container" style="margin-top: 80px; padding: 0 10px;">
+    <div class="container" style="margin-top: 80px; padding: 0 12px;">
         <div class="main-container">
-            <!-- Hero Section -->
-            <div class="hero-section">
-                <h1 class="hero-title">AI-Powered License Plate Detection</h1>
-                <p class="hero-subtitle">Advanced computer vision system using YOLOv10 and EasyOCR for accurate license plate recognition</p>
+
+            <!-- Hero -->
+            <div class="text-center mb-4">
+                <h1 class="hero-title"><i class="fas fa-shield-alt me-2" style="color:#3498db"></i>AI-Powered License Plate Detection</h1>
+                <p class="hero-subtitle">Advanced computer vision using YOLOv10 &amp; EasyOCR — detect plates from images and videos</p>
             </div>
 
-            <!-- Features Row -->
-            <div class="row mb-4">
+            <!-- Feature cards -->
+            <div class="row g-3 mb-4">
                 <div class="col-md-4">
                     <div class="feature-card text-center">
-                        <div class="feature-icon">
-                            <i class="fas fa-upload"></i>
-                        </div>
-                        <h3 class="feature-title">Image Upload</h3>
-                        <p class="feature-description">Upload images and get instant license plate detection results with bounding boxes and extracted text.</p>
-                    </div>
-                </div>
-
-                <div class="col-md-4">
-                    <div class="feature-card text-center">
-                        <div class="feature-icon">
-                            <i class="fas fa-video"></i>
-                        </div>
-                        <h3 class="feature-title">Live Detection</h3>
-                        <p class="feature-description">Real-time license plate detection using your webcam with adjustable confidence and detection intervals.</p>
+                        <div class="feature-icon text-primary"><i class="fas fa-image"></i></div>
+                        <h5 class="fw-bold">Image Upload</h5>
+                        <p class="text-muted small mb-0">Upload JPG, PNG, GIF and get instant bounding boxes with extracted plate text.</p>
                     </div>
                 </div>
                 <div class="col-md-4">
                     <div class="feature-card text-center">
-                        <div class="feature-icon">
-                            <i class="fas fa-database"></i>
-                        </div>
-                        <h3 class="feature-title">Data Storage</h3>
-                        <p class="feature-description">Automatically save results to JSON files and SQLite database for analysis and record keeping.</p>
+                        <div class="feature-icon" style="color:#8e44ad"><i class="fas fa-film"></i></div>
+                        <h5 class="fw-bold">Video Upload</h5>
+                        <p class="text-muted small mb-0">Upload MP4, AVI, MOV files. The AI samples frames automatically and finds every plate.</p>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="feature-card text-center">
+                        <div class="feature-icon text-success"><i class="fas fa-video"></i></div>
+                        <h5 class="fw-bold">Live Webcam</h5>
+                        <p class="text-muted small mb-0">Real-time detection through your camera with adjustable confidence and interval.</p>
                     </div>
                 </div>
             </div>
 
-            <!-- Upload Section -->
-            <div class="row">
-                <div class="col-md-8 mx-auto">
-                    <div class="feature-card">
-                        <h3 class="text-center mb-4">
-                            <i class="fas fa-upload me-2"></i>Upload Image for Detection
-                        </h3>
-                        
-                        <div class="upload-area" id="uploadArea">
-                            <div class="upload-icon">
-                                <i class="fas fa-cloud-upload-alt"></i>
-                            </div>
-                            <h4>Drag & Drop your image here</h4>
-                            <p class="text-muted">or click to browse files</p>
-                            <p class="text-muted small">Supported formats: JPG, PNG, GIF (Max: 16MB)</p>
-                            <input type="file" id="fileInput" accept="image/*" style="display: none;">
-                        </div>
-
-                        <div class="text-center mt-3">
-                            <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
-                                <i class="fas fa-folder-open me-2"></i>Browse Files
+            <!-- Upload section with tabs -->
+            <div class="row justify-content-center">
+                <div class="col-12 col-lg-9">
+                    <ul class="nav upload-tabs" id="uploadTabs">
+                        <li class="nav-item">
+                            <button class="nav-link active" id="tab-img" data-bs-toggle="tab" data-bs-target="#pane-img">
+                                <i class="fas fa-image me-2"></i>Image Upload
                             </button>
-                        </div>
+                        </li>
+                        <li class="nav-item">
+                            <button class="nav-link" id="tab-vid" data-bs-toggle="tab" data-bs-target="#pane-vid">
+                                <i class="fas fa-film me-2"></i>Video Upload
+                            </button>
+                        </li>
+                    </ul>
 
-                        <!-- Loading Spinner -->
-                        <div class="loading" id="loading">
-                            <div class="spinner-border" role="status">
-                                <span class="visually-hidden">Loading...</span>
+                    <div class="tab-content">
+                        <!-- ── IMAGE TAB ── -->
+                        <div class="tab-pane fade show active" id="pane-img">
+                            <div id="imgDropZone" class="upload-area" onclick="document.getElementById('imgFileInput').click()">
+                                <div class="upload-icon"><i class="fas fa-cloud-upload-alt"></i></div>
+                                <h5>Drag &amp; Drop your image here</h5>
+                                <p class="text-muted mb-1">or click to browse files</p>
+                                <p class="text-muted small">Supported: JPG, PNG, GIF &nbsp;·&nbsp; Max: 200 MB</p>
+                                <input type="file" id="imgFileInput" accept="image/*">
                             </div>
-                            <p class="mt-2">Processing image... Please wait</p>
+                            <div class="text-center mt-3">
+                                <button class="btn btn-upload-img" onclick="document.getElementById('imgFileInput').click()">
+                                    <i class="fas fa-folder-open me-2"></i>Browse Image
+                                </button>
+                            </div>
+
+                            <!-- Image loading -->
+                            <div class="loading" id="imgLoading">
+                                <div class="spinner-border text-primary" role="status"></div>
+                                <p class="mt-2 text-muted">Processing image…</p>
+                            </div>
+
+                            <!-- Image results -->
+                            <div class="result-section" id="imgResult">
+                                <h5 class="text-center mb-3"><i class="fas fa-check-circle text-success me-2"></i>Detection Results</h5>
+                                <div class="row">
+                                    <div class="col-md-7">
+                                        <img id="imgResultImg" class="result-image" alt="Annotated image">
+                                    </div>
+                                    <div class="col-md-5 mt-3 mt-md-0">
+                                        <h6><i class="fas fa-list me-2"></i>Detected Plates</h6>
+                                        <div id="imgPlateList"></div>
+                                        <p class="text-muted mt-2"><strong>Total:</strong> <span id="imgPlateCount">0</span></p>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
 
-                        <!-- Results Section -->
-                        <div class="result-section" id="resultSection">
-                            <h4 class="text-center mb-3">
-                                <i class="fas fa-check-circle text-success me-2"></i>Detection Results
-                            </h4>
-                            
-                            <div class="row">
-                                <div class="col-md-8">
-                                    <img id="resultImage" class="result-image" alt="Processed image">
-                                </div>
-                                <div class="col-md-4">
-                                    <div class="license-plate-list">
-                                        <h5><i class="fas fa-list me-2"></i>Detected Plates</h5>
-                                        <div id="plateList"></div>
-                                        <p class="text-muted mt-2">
-                                            <strong>Total detected:</strong> <span id="plateCount">0</span>
-                                        </p>
+                        <!-- ── VIDEO TAB ── -->
+                        <div class="tab-pane fade" id="pane-vid">
+                            <div id="vidDropZone" class="upload-area video-zone" onclick="document.getElementById('vidFileInput').click()">
+                                <div class="upload-icon"><i class="fas fa-film"></i></div>
+                                <h5>Drag &amp; Drop your video here</h5>
+                                <p class="text-muted mb-1">or click to browse files</p>
+                                <p class="text-muted small">Supported: MP4, AVI, MOV, MKV, WEBM &nbsp;·&nbsp; Max: 200 MB</p>
+                                <input type="file" id="vidFileInput" accept="video/*,.avi">
+                            </div>
+                            <div class="text-center mt-3">
+                                <button class="btn btn-upload-vid" onclick="document.getElementById('vidFileInput').click()">
+                                    <i class="fas fa-folder-open me-2"></i>Browse Video
+                                </button>
+                            </div>
+
+                            <!-- Video loading -->
+                            <div class="loading" id="vidLoading">
+                                <div class="spinner-border" style="color:#8e44ad" role="status"></div>
+                                <p class="mt-2 text-muted">Analysing video frames… this may take a moment.</p>
+                                <div class="progress-wrap">
+                                    <div class="progress" style="height:6px;border-radius:10px">
+                                        <div id="vidProgressBar" class="progress-bar progress-bar-striped progress-bar-animated"
+                                             style="width:100%;background:linear-gradient(90deg,#8e44ad,#3498db)"></div>
                                     </div>
+                                </div>
+                            </div>
+
+                            <!-- Video results -->
+                            <div class="result-section" id="vidResult">
+                                <h5 class="text-center mb-3"><i class="fas fa-check-circle text-success me-2"></i>Video Analysis Results</h5>
+
+                                <!-- Stats bar -->
+                                <div class="vid-stats">
+                                    <div class="vid-stat">
+                                        <div class="vid-stat-num" id="vidPlateCount">0</div>
+                                        <div class="vid-stat-lbl">Unique Plates</div>
+                                    </div>
+                                    <div class="vid-stat">
+                                        <div class="vid-stat-num" id="vidFrames">0</div>
+                                        <div class="vid-stat-lbl">Frames Scanned</div>
+                                    </div>
+                                    <div class="vid-stat">
+                                        <div class="vid-stat-num" id="vidDuration">0s</div>
+                                        <div class="vid-stat-lbl">Duration</div>
+                                    </div>
+                                    <div class="vid-stat">
+                                        <div class="vid-stat-num" id="vidEvents">0</div>
+                                        <div class="vid-stat-lbl">Detection Events</div>
+                                    </div>
+                                </div>
+
+                                <div class="row">
+                                    <!-- Preview thumbnail -->
+                                    <div class="col-md-6 mb-3">
+                                        <h6><i class="fas fa-image me-2"></i>First Detection Frame</h6>
+                                        <img id="vidPreview" class="result-image" alt="First frame with detection" style="display:none">
+                                        <p id="vidNoPreview" class="text-muted small">No detection preview available</p>
+                                    </div>
+                                    <!-- Unique plates -->
+                                    <div class="col-md-6 mb-3">
+                                        <h6><i class="fas fa-id-card me-2"></i>Unique Plates Found</h6>
+                                        <div id="vidPlateList"></div>
+                                    </div>
+                                </div>
+
+                                <!-- Detection timeline -->
+                                <div id="vidTimelineWrap" style="display:none">
+                                    <h6><i class="fas fa-clock me-2"></i>Detection Timeline</h6>
+                                    <div id="vidTimeline" style="max-height:260px;overflow-y:auto"></div>
                                 </div>
                             </div>
                         </div>
@@ -308,124 +301,150 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        const uploadArea = document.getElementById('uploadArea');
-        const fileInput = document.getElementById('fileInput');
-        const loading = document.getElementById('loading');
-        const resultSection = document.getElementById('resultSection');
-        const resultImage = document.getElementById('resultImage');
-        const plateList = document.getElementById('plateList');
-        const plateCount = document.getElementById('plateCount');
-
-        // Drag and drop functionality
-        uploadArea.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            uploadArea.classList.add('dragover');
-        });
-
-        uploadArea.addEventListener('dragleave', () => {
-            uploadArea.classList.remove('dragover');
-        });
-
-        uploadArea.addEventListener('drop', (e) => {
-            e.preventDefault();
-            uploadArea.classList.remove('dragover');
-            const files = e.dataTransfer.files;
-            if (files.length > 0) {
-                handleFile(files[0]);
-            }
-        });
-
-        uploadArea.addEventListener('click', () => {
-            fileInput.click();
-        });
-
-        fileInput.addEventListener('change', (e) => {
-            if (e.target.files.length > 0) {
-                handleFile(e.target.files[0]);
-            }
-        });
-
-        function handleFile(file) {
-            if (!file.type.startsWith('image/')) {
-                alert('Please select an image file.');
-                return;
-            }
-
-            if (file.size > 16 * 1024 * 1024) {
-                alert('File size must be less than 16MB.');
-                return;
-            }
-
-            uploadFile(file);
+        // ── Shared drag-and-drop helper ───────────────────────────────────────
+        function setupDrop(zone, input, handler) {
+            zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('dragover'); });
+            zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+            zone.addEventListener('drop', e => {
+                e.preventDefault(); zone.classList.remove('dragover');
+                if (e.dataTransfer.files.length) handler(e.dataTransfer.files[0]);
+            });
+            input.addEventListener('change', e => { if (e.target.files.length) handler(e.target.files[0]); });
         }
 
-        function uploadFile(file) {
-            const formData = new FormData();
-            formData.append('file', file);
+        // ── IMAGE UPLOAD ──────────────────────────────────────────────────────
+        const imgZone    = document.getElementById('imgDropZone');
+        const imgInput   = document.getElementById('imgFileInput');
+        const imgLoading = document.getElementById('imgLoading');
+        const imgResult  = document.getElementById('imgResult');
 
-            // Show loading
-            loading.style.display = 'block';
-            resultSection.style.display = 'none';
+        setupDrop(imgZone, imgInput, handleImage);
 
-            fetch('/upload', {
-                method: 'POST',
-                body: formData
-            })
-            .then(async response => {
-                let data;
-                try {
-                    data = await response.json();
-                } catch (error) {
-                    const text = await response.text();
-                    throw new Error(text || `HTTP ${response.status}`);
-                }
+        function handleImage(file) {
+            if (!file.type.startsWith('image/')) { alert('Please select an image file.'); return; }
+            if (file.size > 200 * 1024 * 1024) { alert('File exceeds 200 MB limit.'); return; }
 
-                if (!response.ok) {
-                    const details = data.details ? `\nDetails: ${data.details}` : '';
-                    throw new Error((data.error || `HTTP ${response.status}`) + details);
-                }
+            imgLoading.style.display = 'block';
+            imgResult.style.display  = 'none';
 
-                return data;
-            })
-            .then(data => {
-                loading.style.display = 'none';
+            const fd = new FormData();
+            fd.append('file', file);
 
-                // Display results
-                if (data.image) {
-                    resultImage.src = 'data:image/jpeg;base64,' + data.image;
-                    displayLicensePlates(data.license_plates, data.detections || []);
-                    resultSection.style.display = 'block';
-                }
-            })
-            .catch(error => {
-                loading.style.display = 'none';
-                console.error('Error:', error);
-                alert('Error: ' + error.message);
-            });
+            fetch('/upload', { method: 'POST', body: fd })
+                .then(r => r.json())
+                .then(data => {
+                    imgLoading.style.display = 'none';
+                    if (data.error) { alert('Error: ' + data.error + (data.details ? '\n' + data.details : '')); return; }
+
+                    document.getElementById('imgResultImg').src = 'data:image/jpeg;base64,' + data.image;
+                    const list  = document.getElementById('imgPlateList');
+                    const count = document.getElementById('imgPlateCount');
+                    list.innerHTML = '';
+                    const plates = data.license_plates || [];
+                    count.textContent = plates.length;
+
+                    if (!plates.length) {
+                        const dets = data.detections || [];
+                        list.innerHTML = dets.length
+                            ? '<p class="text-muted small">Plate region found but OCR could not read the text clearly.</p>'
+                            : '<p class="text-muted small">No license plates detected in this image.</p>';
+                    } else {
+                        plates.forEach(p => {
+                            const b = document.createElement('span');
+                            b.className = 'plate-badge'; b.textContent = p;
+                            list.appendChild(b);
+                        });
+                    }
+                    imgResult.style.display = 'block';
+                })
+                .catch(err => { imgLoading.style.display = 'none'; alert('Upload failed: ' + err.message); });
         }
 
-        function displayLicensePlates(plates, detections = []) {
-            plateList.innerHTML = '';
-            plateCount.textContent = plates.length;
+        // ── VIDEO UPLOAD ──────────────────────────────────────────────────────
+        const vidZone    = document.getElementById('vidDropZone');
+        const vidInput   = document.getElementById('vidFileInput');
+        const vidLoading = document.getElementById('vidLoading');
+        const vidResult  = document.getElementById('vidResult');
 
-            if (plates.length === 0) {
-                if (detections.length > 0) {
-                    plateList.innerHTML = '<p class="text-muted">Plate region detected, but OCR could not read the text clearly.</p>';
-                } else {
-                    plateList.innerHTML = '<p class="text-muted">No license plates detected</p>';
-                }
-                return;
+        setupDrop(vidZone, vidInput, handleVideo);
+
+        function handleVideo(file) {
+            const vidExts = ['mp4','avi','mov','mkv','webm'];
+            const ext = file.name.split('.').pop().toLowerCase();
+            if (!vidExts.includes(ext)) { alert('Please select a video file (MP4, AVI, MOV, MKV, WEBM).'); return; }
+            if (file.size > 200 * 1024 * 1024) { alert('File exceeds 200 MB limit.'); return; }
+
+            vidLoading.style.display = 'block';
+            vidResult.style.display  = 'none';
+
+            const fd = new FormData();
+            fd.append('file', file);
+
+            fetch('/upload_video', { method: 'POST', body: fd })
+                .then(r => r.json())
+                .then(data => {
+                    vidLoading.style.display = 'none';
+                    if (data.error) { alert('Error: ' + data.error + (data.details ? '\n' + data.details : '')); return; }
+                    renderVideoResults(data);
+                    vidResult.style.display = 'block';
+                })
+                .catch(err => { vidLoading.style.display = 'none'; alert('Video upload failed: ' + err.message); });
+        }
+
+        function renderVideoResults(data) {
+            // Stats
+            document.getElementById('vidPlateCount').textContent = data.count || 0;
+            document.getElementById('vidFrames').textContent     = data.frames_processed || 0;
+            document.getElementById('vidDuration').textContent   = (data.duration_seconds || 0).toFixed(1) + 's';
+            document.getElementById('vidEvents').textContent     = (data.detections || []).length;
+
+            // Preview
+            const preview = document.getElementById('vidPreview');
+            const noPreview = document.getElementById('vidNoPreview');
+            if (data.preview) {
+                preview.src = 'data:image/jpeg;base64,' + data.preview;
+                preview.style.display = 'block';
+                noPreview.style.display = 'none';
+            } else {
+                preview.style.display = 'none';
+                noPreview.style.display = 'block';
             }
 
-            plates.forEach((plate, index) => {
-                const plateDiv = document.createElement('div');
-                plateDiv.className = 'alert alert-info mb-2';
-                plateDiv.innerHTML = `
-                    <i class="fas fa-car me-2"></i>
-                    <strong>Plate ${index + 1}:</strong> ${plate}
-                `;
-                plateList.appendChild(plateDiv);
-            });
+            // Unique plates
+            const list = document.getElementById('vidPlateList');
+            list.innerHTML = '';
+            const plates = data.license_plates || [];
+            if (!plates.length) {
+                list.innerHTML = '<p class="text-muted small">No license plates found in this video.</p>';
+            } else {
+                plates.forEach(p => {
+                    const conf = data.plate_confidences ? data.plate_confidences[p] : null;
+                    const b = document.createElement('div');
+                    b.className = 'plate-badge video d-block mb-1';
+                    b.innerHTML = `${p}${conf !== null ? ` <small style="opacity:.7">(${(conf*100).toFixed(0)}%)</small>` : ''}`;
+                    list.appendChild(b);
+                });
+            }
+
+            // Timeline
+            const timeline = document.getElementById('vidTimeline');
+            const wrap     = document.getElementById('vidTimelineWrap');
+            const dets = (data.detections || []).filter(d => d.label && d.label !== 'License Plate');
+            if (dets.length) {
+                timeline.innerHTML = '';
+                dets.slice(0, 100).forEach(d => {
+                    const ts = d.timestamp != null ? d.timestamp.toFixed(1) + 's' : '—';
+                    const div = document.createElement('div');
+                    div.className = 'timeline-item';
+                    div.innerHTML = `<span class="timeline-ts">${ts}</span>
+                        <span class="timeline-plate">${d.label}</span>
+                        <small class="text-muted">${(d.confidence*100).toFixed(0)}%</small>`;
+                    timeline.appendChild(div);
+                });
+                wrap.style.display = 'block';
+            } else {
+                wrap.style.display = 'none';
+            }
         }
     </script>
 </body>

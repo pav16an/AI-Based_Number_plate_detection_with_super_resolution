@@ -1,6 +1,6 @@
 # License Plate Detection System
 
-Production-ready Flask application for license plate detection and OCR using `YOLO` and `EasyOCR`.
+Production-ready Flask application for license plate detection and OCR using `YOLOv10` and `EasyOCR`.
 
 ## Project Structure
 
@@ -9,12 +9,21 @@ app.py                  WSGI entrypoint
 run.py                  Flask app factory
 src/                    Application code
 templates/              Web UI templates
-weights/best.pt         Detection model
+weights/best.pt         Previous local detection model
+weights/yolov10-license-plate.pt  Default YOLOv10 plate detector
 tests/                  Automated tests
 docker/                 Dockerfiles
 docker-compose.yml      Local production-style run
 render.yaml             Render deployment blueprint
 ```
+
+## Model Upgrade
+
+The default detector is now `weights/yolov10-license-plate.pt`, a public YOLOv10 license plate model.
+
+- Source: `Rawzy/yolov10n-license-plate-detection` on Hugging Face
+- Published validation metrics: precision `0.9726`, recall `0.9148`, mAP50 `0.9673`, mAP50-95 `0.6976`
+- Why it was chosen: it loads cleanly with the existing YOLOv10 compatibility shims and performed better than the previous checkpoint on one of the repo sample images during local verification
 
 ## What Was Cleaned Up
 
@@ -74,9 +83,44 @@ Copy `.env.example` to `.env` and edit the important values:
 FLASK_ENV=production
 SECRET_KEY=change-this
 DATABASE_PATH=data/app.db
-MODEL_PATH=weights/best.pt
+MODEL_PATH=weights/yolov10-license-plate.pt
 MODEL_DEVICE=cpu
 ```
+
+## Predict Number Plates
+
+### Browser
+
+1. Start the app:
+
+```powershell
+python run.py
+```
+
+2. Open `http://localhost:5000`
+3. Upload an image on `/` or use `/webcam`
+
+### API
+
+Use the image endpoint:
+
+```powershell
+curl -X POST http://localhost:5000/api/v1/detect/image -F "file=@data/carImage2.png"
+```
+
+### Local CLI
+
+You can now run direct prediction without opening the browser:
+
+```powershell
+.venv\Scripts\python.exe scripts\predict_plate.py data\carImage2.png --save uploads\predicted-carImage2.jpg
+```
+
+Optional flags:
+
+- `--confidence 0.35` to tune recall vs precision
+- `--fast` for faster inference with fewer fallback passes
+- `--model weights\best.pt` if you want to compare against the old detector
 
 ## Push To Your Existing GitHub Repo
 

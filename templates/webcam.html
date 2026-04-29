@@ -327,6 +327,7 @@
                             </div>
                         </div>
                     </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -334,412 +335,308 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        let videoElement = document.getElementById('videoElement');
-        let canvasElement = document.getElementById('canvasElement');
-        let ctx = canvasElement.getContext('2d');
-        let stream = null;
-        let detectionInterval = null;
-        let sessionDetections = 0;
-        let detectedPlates = new Set();
-        let lastFrameTime = Date.now();
-        let frameCount = 0;
-        let currentFacingMode = 'environment';
-        let processingFrame = false;
-        let plateHistory = new Map(); // Track plates with timestamps
-        let lastDetectionTime = 0;
-        let fpsInterval = null;
-
-        const startBtn = document.getElementById('startBtn');
-        const stopBtn = document.getElementById('stopBtn');
-        const captureBtn = document.getElementById('captureBtn');
-        const flipBtn = document.getElementById('flipBtn');
+        // ── DOM refs ──────────────────────────────────────────────────────────
+        const videoElement    = document.getElementById('videoElement');
+        const canvasElement   = document.getElementById('canvasElement');
+        const ctx             = canvasElement.getContext('2d');
+        const startBtn        = document.getElementById('startBtn');
+        const stopBtn         = document.getElementById('stopBtn');
+        const captureBtn      = document.getElementById('captureBtn');
+        const flipBtn         = document.getElementById('flipBtn');
         const statusIndicator = document.getElementById('statusIndicator');
-        const statusText = document.getElementById('statusText');
+        const statusText      = document.getElementById('statusText');
         const confidenceSlider = document.getElementById('confidenceSlider');
-        const intervalSlider = document.getElementById('intervalSlider');
+        const intervalSlider   = document.getElementById('intervalSlider');
 
-        // Update slider values
-        confidenceSlider.addEventListener('input', (e) => {
+        // ── State ─────────────────────────────────────────────────────────────
+        let stream            = null;
+        let detectionInterval = null;
+        let fpsInterval       = null;
+        let processingFrame   = false;
+        let processingTimeout = null;
+        let sessionDetections = 0;
+        let detectedPlates    = new Set();
+        let plateHistory      = new Map();
+        let lastFrameTime     = Date.now();
+        let frameCount        = 0;
+        let currentFacingMode = 'environment';
+        let rafId             = null;
+
+        // ── Slider labels ─────────────────────────────────────────────────────
+        confidenceSlider.addEventListener('input', e => {
             document.getElementById('confidenceValue').textContent = e.target.value;
         });
-
-        intervalSlider.addEventListener('input', (e) => {
+        intervalSlider.addEventListener('input', e => {
             document.getElementById('intervalValue').textContent = e.target.value;
-            if (detectionInterval) {
-                clearInterval(detectionInterval);
-                startDetection();
-            }
+            if (detectionInterval) { clearInterval(detectionInterval); startDetection(); }
+        });
+        document.getElementById('continuousDetection').addEventListener('change', e => {
+            if (detectionInterval) clearInterval(detectionInterval);
+            if (e.target.checked) startDetection();
         });
 
-        // Continuous detection toggle
-        document.getElementById('continuousDetection').addEventListener('change', (e) => {
-            if (detectionInterval) {
-                clearInterval(detectionInterval);
-                if (e.target.checked) {
-                    startDetection();
+        // ── Canvas sync via RAF ───────────────────────────────────────────────
+        // We size the canvas to match the VIDEO ELEMENT'S RENDERED (CSS) pixels.
+        // This is the only correct way — no intrinsic-resolution math needed.
+        function startCanvasSync() {
+            function sync() {
+                const rect = videoElement.getBoundingClientRect();
+                if (rect.width > 0 && rect.height > 0) {
+                    const w = Math.round(rect.width);
+                    const h = Math.round(rect.height);
+                    if (canvasElement.width !== w || canvasElement.height !== h) {
+                        canvasElement.width  = w;
+                        canvasElement.height = h;
+                    }
                 }
+                rafId = requestAnimationFrame(sync);
             }
-        });
+            rafId = requestAnimationFrame(sync);
+        }
+        function stopCanvasSync() {
+            if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+        }
 
-        // Start camera
+        // ── FPS counter ───────────────────────────────────────────────────────
+        function startFPSCounter() {
+            if (fpsInterval) clearInterval(fpsInterval);
+            lastFrameTime = Date.now(); frameCount = 0;
+            fpsInterval = setInterval(() => {
+                const now = Date.now();
+                document.getElementById('fps').textContent =
+                    Math.round(frameCount * 1000 / (now - lastFrameTime));
+                frameCount = 0; lastFrameTime = now;
+            }, 1000);
+        }
+
+        // ── Start camera ──────────────────────────────────────────────────────
         startBtn.addEventListener('click', async () => {
             try {
-                stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { 
-                        width: { ideal: 1280 }, 
-                        height: { ideal: 720 },
-                        facingMode: currentFacingMode,
-                        frameRate: { ideal: 15 }
-                    } 
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: {ideal:1280}, height: {ideal:720},
+                             facingMode: currentFacingMode, frameRate: {ideal:15} }
                 });
                 videoElement.srcObject = stream;
-                syncCanvasToVideo();
-
-                startBtn.disabled = true;
-                stopBtn.disabled = false;
-                captureBtn.disabled = false;
-                flipBtn.disabled = false;
-                
+                startBtn.disabled = true; stopBtn.disabled = false;
+                captureBtn.disabled = false; flipBtn.disabled = false;
                 statusIndicator.className = 'status-indicator status-active';
                 statusText.textContent = 'Camera Active';
-                
-                startDetection();
-                startFPSCounter();
-                
+
+                videoElement.addEventListener('playing', () => {
+                    startCanvasSync();
+                    startDetection();
+                    startFPSCounter();
+                }, { once: true });
+
             } catch (err) {
-                console.error('Error accessing camera:', err);
-                alert('Error accessing camera. Please check permissions.');
+                console.error('Camera error:', err);
+                alert('Error accessing camera: ' + err.message);
             }
         });
 
-        // Stop camera
+        // ── Stop camera ───────────────────────────────────────────────────────
         stopBtn.addEventListener('click', () => {
-            if (stream) {
-                stream.getTracks().forEach(track => track.stop());
-                stream = null;
-            }
-            
-            if (detectionInterval) {
-                clearInterval(detectionInterval);
-                detectionInterval = null;
-            }
-
-            if (fpsInterval) {
-                clearInterval(fpsInterval);
-                fpsInterval = null;
-            }
-            
+            if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+            if (detectionInterval)  { clearInterval(detectionInterval);  detectionInterval  = null; }
+            if (fpsInterval)        { clearInterval(fpsInterval);        fpsInterval        = null; }
+            if (processingTimeout)  { clearTimeout(processingTimeout);   processingTimeout  = null; }
+            stopCanvasSync();
             videoElement.srcObject = null;
             ctx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-            
-            startBtn.disabled = false;
-            stopBtn.disabled = true;
-            captureBtn.disabled = true;
-            flipBtn.disabled = true;
-            
+            processingFrame = false;
+            startBtn.disabled = false; stopBtn.disabled = true;
+            captureBtn.disabled = true; flipBtn.disabled = true;
             statusIndicator.className = 'status-indicator status-inactive';
             statusText.textContent = 'Camera Inactive';
         });
 
-        // Capture frame
-        captureBtn.addEventListener('click', () => {
-            captureAndProcess();
-        });
+        captureBtn.addEventListener('click', () => captureAndProcess());
 
-        // Flip camera
         flipBtn.addEventListener('click', async () => {
-            if (stream) {
-                stream.getTracks().forEach(track => track.stop());
+            if (!stream) return;
+            stream.getTracks().forEach(t => t.stop());
+            currentFacingMode = currentFacingMode === 'user' ? 'environment' : 'user';
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: { width:{ideal:1280}, height:{ideal:720},
+                             facingMode: currentFacingMode, frameRate:{ideal:15} }
+                });
+                videoElement.srcObject = stream;
+            } catch (err) {
+                alert('Could not switch camera: ' + err.message);
                 currentFacingMode = currentFacingMode === 'user' ? 'environment' : 'user';
-                
-                try {
-                    stream = await navigator.mediaDevices.getUserMedia({ 
-                        video: { 
-                            width: { ideal: 1280 }, 
-                            height: { ideal: 720 },
-                            facingMode: currentFacingMode,
-                            frameRate: { ideal: 15 }
-                        } 
-                    });
-                    
-                    videoElement.srcObject = stream;
-                    syncCanvasToVideo();
-                    
-                } catch (err) {
-                    console.error('Error switching camera:', err);
-                    alert('Could not switch camera. This device may only have one camera.');
-                    currentFacingMode = currentFacingMode === 'user' ? 'environment' : 'user';
-                }
             }
         });
 
+        // ── Detection loop ────────────────────────────────────────────────────
         function startDetection() {
             if (!document.getElementById('continuousDetection').checked) return;
-
-            if (detectionInterval) {
-                clearInterval(detectionInterval);
-            }
-            
-            const interval = parseInt(intervalSlider.value);
+            if (detectionInterval) clearInterval(detectionInterval);
+            captureAndProcess();
+            const ms = parseInt(intervalSlider.value, 10);
             detectionInterval = setInterval(() => {
-                if (!processingFrame) {
-                    captureAndProcess();
-                }
-            }, interval);
-            
-            // Also process immediately
-            setTimeout(() => {
-                if (!processingFrame) {
-                    captureAndProcess();
-                }
-            }, 100);
+                if (!processingFrame) captureAndProcess();
+            }, ms);
         }
 
-        function startFPSCounter() {
-            if (fpsInterval) {
-                clearInterval(fpsInterval);
-            }
-
-            fpsInterval = setInterval(() => {
-                const now = Date.now();
-                const fps = Math.round(frameCount * 1000 / (now - lastFrameTime));
-                document.getElementById('fps').textContent = fps;
-                frameCount = 0;
-                lastFrameTime = now;
-            }, 1000);
-        }
-
-        function syncCanvasToVideo() {
-            const applyDimensions = () => {
-                if (!videoElement.videoWidth || !videoElement.videoHeight) return;
-                canvasElement.width = videoElement.videoWidth;
-                canvasElement.height = videoElement.videoHeight;
-            };
-
-            videoElement.addEventListener('loadedmetadata', applyDimensions, { once: true });
-            videoElement.addEventListener('loadeddata', applyDimensions, { once: true });
-            requestAnimationFrame(applyDimensions);
-        }
-
+        // ── Capture + send ────────────────────────────────────────────────────
         function captureAndProcess() {
-            if (!videoElement.videoWidth || !videoElement.videoHeight || processingFrame) return;
-            
+            if (!videoElement.videoWidth || !videoElement.videoHeight) return;
+            if (processingFrame) return;
+
             frameCount++;
             processingFrame = true;
-            
-            // Create a temporary canvas for better quality capture
-            const tempCanvas = document.createElement('canvas');
-            const tempCtx = tempCanvas.getContext('2d');
-            
-            // Set canvas size to video dimensions for better quality
-            tempCanvas.width = videoElement.videoWidth;
-            tempCanvas.height = videoElement.videoHeight;
-            
-            // Draw video frame to temporary canvas
-            tempCtx.drawImage(videoElement, 0, 0);
-            
-            // Convert canvas to blob with optimized quality for speed
-            tempCanvas.toBlob(blob => {
-                if (blob) {
-                    processFrame(blob);
-                }
-            }, 'image/jpeg', 0.6); // Balanced quality for speed
+
+            // Safety timeout – always release lock after 10 s
+            if (processingTimeout) clearTimeout(processingTimeout);
+            processingTimeout = setTimeout(() => { processingFrame = false; }, 10000);
+
+            // Downscale to max 800 px wide for speed
+            const srcW  = videoElement.videoWidth;
+            const srcH  = videoElement.videoHeight;
+            const ratio = Math.min(1, 800 / srcW);
+            const sendW = Math.round(srcW * ratio);
+            const sendH = Math.round(srcH * ratio);
+
+            const tmp = document.createElement('canvas');
+            tmp.width = sendW; tmp.height = sendH;
+            tmp.getContext('2d').drawImage(videoElement, 0, 0, sendW, sendH);
+
+            tmp.toBlob(blob => {
+                if (blob) sendToBackend(blob, sendW, sendH);
+                else { clearTimeout(processingTimeout); processingFrame = false; }
+            }, 'image/jpeg', 0.85);
         }
 
-        function processFrame(blob) {
-            const formData = new FormData();
-            formData.append('frame', blob);
-            formData.append('confidence', confidenceSlider.value);
+        function sendToBackend(blob, sendW, sendH) {
+            const fd = new FormData();
+            fd.append('frame', blob);
+            fd.append('confidence', confidenceSlider.value);
+            fd.append('fast_mode', 'true');
 
-            fetch('/process_frame', {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                return response.json();
-            })
-            .then(data => {
-                processingFrame = false;
-                if (data.success) {
-                    drawDetections(data.detections);
-                    if (data.license_plates && data.license_plates.length > 0) {
-                        updateDetectedPlates(data.license_plates);
-                        lastDetectionTime = Date.now();
+            fetch('/process_frame', { method: 'POST', body: fd })
+                .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+                .then(data => {
+                    clearTimeout(processingTimeout);
+                    processingFrame = false;
+                    if (data.success) {
+                        drawDetections(data.detections || [], sendW, sendH);
+                        if (data.license_plates && data.license_plates.length > 0)
+                            updateDetectedPlates(data.license_plates);
+                    } else {
+                        ctx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+                        console.warn('Backend:', data.error, data.details || '');
                     }
-                } else {
-                    console.error('Processing failed:', data.error, data.details || '');
+                })
+                .catch(err => {
+                    clearTimeout(processingTimeout);
+                    processingFrame = false;
                     ctx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-                }
-            })
-            .catch(error => {
-                processingFrame = false;
-                console.error('Error processing frame:', error);
-                ctx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-            });
+                    console.error('Frame error:', err);
+                });
         }
 
-        function drawDetections(detections) {
-            // Clear previous drawings
+        // ── Draw bounding boxes ───────────────────────────────────────────────
+        // detections are in sendW x sendH coordinate space.
+        // canvasElement.width/height equals the VIDEO ELEMENT's rendered CSS pixel size.
+        // Scale factor maps detection coords → canvas coords.
+        function drawDetections(detections, sendW, sendH) {
             ctx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-            
-            if (!detections || detections.length === 0) return;
-            
-            // Draw bounding boxes with different colors for multiple plates
-            const colors = ['#00ff00', '#ff6b00', '#ff0066', '#6600ff', '#00ffff'];
-            ctx.lineWidth = 3;
-            ctx.font = 'bold 16px Arial';
-            
-            detections.forEach((detection, index) => {
-                const { x1, y1, x2, y2, label, confidence } = detection;
-                const color = colors[index % colors.length];
-                
-                // Use actual coordinates (no scaling needed if server returns correct coords)
-                const scaleX = canvasElement.width / videoElement.videoWidth;
-                const scaleY = canvasElement.height / videoElement.videoHeight;
-                
-                const scaledX1 = x1 * scaleX;
-                const scaledY1 = y1 * scaleY;
-                const scaledX2 = x2 * scaleX;
-                const scaledY2 = y2 * scaleY;
-                
-                // Draw bounding box
+            if (!detections.length) return;
+
+            const cw = canvasElement.width;
+            const ch = canvasElement.height;
+            const sx = cw / sendW;
+            const sy = ch / sendH;
+
+            const COLORS = ['#00ff41', '#ff6b00', '#ff0066', '#00cfff', '#ffe600'];
+
+            detections.forEach((det, i) => {
+                const { x1, y1, x2, y2, label, confidence } = det;
+                const color = COLORS[i % COLORS.length];
+                const rx = x1 * sx, ry = y1 * sy;
+                const rw = (x2 - x1) * sx, rh = (y2 - y1) * sy;
+
+                // Box
                 ctx.strokeStyle = color;
-                ctx.strokeRect(scaledX1, scaledY1, scaledX2 - scaledX1, scaledY2 - scaledY1);
-                
-                // Draw corner markers for better visibility
-                const cornerSize = 15;
+                ctx.lineWidth   = 3;
+                ctx.strokeRect(rx, ry, rw, rh);
+
+                // Corner accents
+                const C = Math.min(16, rw * 0.3, rh * 0.3);
                 ctx.lineWidth = 4;
-                // Top-left corner
-                ctx.beginPath();
-                ctx.moveTo(scaledX1, scaledY1 + cornerSize);
-                ctx.lineTo(scaledX1, scaledY1);
-                ctx.lineTo(scaledX1 + cornerSize, scaledY1);
-                ctx.stroke();
-                
-                // Top-right corner
-                ctx.beginPath();
-                ctx.moveTo(scaledX2 - cornerSize, scaledY1);
-                ctx.lineTo(scaledX2, scaledY1);
-                ctx.lineTo(scaledX2, scaledY1 + cornerSize);
-                ctx.stroke();
-                
-                // Bottom-left corner
-                ctx.beginPath();
-                ctx.moveTo(scaledX1, scaledY2 - cornerSize);
-                ctx.lineTo(scaledX1, scaledY2);
-                ctx.lineTo(scaledX1 + cornerSize, scaledY2);
-                ctx.stroke();
-                
-                // Bottom-right corner
-                ctx.beginPath();
-                ctx.moveTo(scaledX2 - cornerSize, scaledY2);
-                ctx.lineTo(scaledX2, scaledY2);
-                ctx.lineTo(scaledX2, scaledY2 - cornerSize);
-                ctx.stroke();
-                
-                // Draw label with background
-                if (label) {
-                    const text = `${label} (${(confidence * 100).toFixed(1)}%)`;
-                    ctx.font = 'bold 14px Arial';
-                    const textMetrics = ctx.measureText(text);
-                    const textWidth = textMetrics.width;
-                    const textHeight = 20;
-                    
-                    // Background
-                    ctx.fillStyle = color;
-                    ctx.fillRect(scaledX1, scaledY1 - textHeight - 5, textWidth + 10, textHeight + 5);
-                    
-                    // Text
-                    ctx.fillStyle = '#000000';
-                    ctx.fillText(text, scaledX1 + 5, scaledY1 - 8);
-                }
-                
-                ctx.lineWidth = 3; // Reset line width
+                [[rx,    ry,    1,  1], [rx+rw, ry,    -1,  1],
+                 [rx,    ry+rh, 1, -1], [rx+rw, ry+rh, -1, -1]].forEach(([cx2,cy2,dx,dy]) => {
+                    ctx.beginPath();
+                    ctx.moveTo(cx2 + dx*C, cy2);
+                    ctx.lineTo(cx2,        cy2);
+                    ctx.lineTo(cx2,        cy2 + dy*C);
+                    ctx.stroke();
+                });
+
+                // Label badge
+                const txt = label && label !== 'License Plate'
+                    ? `${label}  ${(confidence*100).toFixed(0)}%`
+                    : `Plate  ${(confidence*100).toFixed(0)}%`;
+                ctx.font = 'bold 13px monospace';
+                const tw = ctx.measureText(txt).width + 12;
+                const th = 20;
+                const ty = ry > th + 4 ? ry - th - 4 : ry + rh + 4;
+                ctx.fillStyle = color;
+                ctx.fillRect(rx, ty, tw, th);
+                ctx.fillStyle = '#000';
+                ctx.fillText(txt, rx + 6, ty + 14);
             });
         }
 
+        // ── Plate history panel ───────────────────────────────────────────────
         function updateDetectedPlates(plates) {
-            if (!plates || plates.length === 0) return;
-            
-            const detectedPlatesDiv = document.getElementById('detectedPlates');
-            const currentTime = Date.now();
-            plates.forEach((plate, index) => {
-                // Check if this is a new detection
-                const lastSeen = plateHistory.get(plate);
-                const isNewDetection = !lastSeen || (currentTime - lastSeen) > 3000; // 3 second cooldown
-                
-                if (isNewDetection) {
-                    plateHistory.set(plate, currentTime);
-                    
-                    if (!detectedPlates.has(plate)) {
-                        detectedPlates.add(plate);
-                        sessionDetections++;
-                        
-                        // Simple color coding
-                        const colors = ['#e8f5e8', '#fff3e0', '#fce4ec'];
-                        const bgColor = colors[index % colors.length];
-                        const borderColors = ['#27ae60', '#ff6b00', '#ff0066'];
-                        const borderColor = borderColors[index % borderColors.length];
-                        
-                        // Add to display
-                        const plateDiv = document.createElement('div');
-                        plateDiv.className = 'detected-plate';
-                        plateDiv.style.backgroundColor = bgColor;
-                        plateDiv.style.borderColor = borderColor;
-                        plateDiv.innerHTML = `
-                            <div class="plate-text" style="color: ${borderColor}">${plate}</div>
-                            <div class="plate-time">${new Date().toLocaleTimeString()}</div>
-                        `;
-                        
-                        // Clear placeholder text
-                        if (detectedPlatesDiv.querySelector('p')) {
-                            detectedPlatesDiv.innerHTML = '';
-                        }
-                        
-                        detectedPlatesDiv.insertBefore(plateDiv, detectedPlatesDiv.firstChild);
-                        
-                        // Keep only last 5 detections visible
-                        const plateElements = detectedPlatesDiv.querySelectorAll('.detected-plate');
-                        if (plateElements.length > 5) {
-                            plateElements[plateElements.length - 1].remove();
-                        }
-                    }
-                }
+            if (!plates || !plates.length) return;
+            const panel = document.getElementById('detectedPlates');
+            const now = Date.now();
+            const BG  = ['#e8f5e8','#fff3e0','#e3f2fd','#fce4ec'];
+            const BD  = ['#27ae60','#ff6b00','#2196f3','#e91e63'];
+
+            plates.forEach(plate => {
+                if (!plate) return;
+                const last  = plateHistory.get(plate);
+                if (last && (now - last) < 3000) return;
+                plateHistory.set(plate, now);
+                if (detectedPlates.has(plate)) return;
+                detectedPlates.add(plate);
+                sessionDetections++;
+
+                const idx = (sessionDetections - 1) % 4;
+                const div = document.createElement('div');
+                div.className = 'detected-plate';
+                div.style.backgroundColor = BG[idx];
+                div.style.borderColor     = BD[idx];
+                div.innerHTML = `
+                    <div class="plate-text" style="color:${BD[idx]}">${plate}</div>
+                    <div class="plate-time">${new Date().toLocaleTimeString()}</div>`;
+
+                if (panel.querySelector('p')) panel.innerHTML = '';
+                panel.insertBefore(div, panel.firstChild);
+                const all = panel.querySelectorAll('.detected-plate');
+                if (all.length > 5) all[all.length - 1].remove();
             });
-            
-            // Update statistics
+
             document.getElementById('sessionDetections').textContent = sessionDetections;
             updateTotalDetections();
-            
-            // Clean up old entries from history (keep last 100)
+
             if (plateHistory.size > 100) {
-                const entries = Array.from(plateHistory.entries());
-                entries.sort((a, b) => b[1] - a[1]); // Sort by timestamp, newest first
-                plateHistory.clear();
-                entries.slice(0, 100).forEach(([plate, time]) => {
-                    plateHistory.set(plate, time);
-                });
+                plateHistory = new Map([...plateHistory.entries()]
+                    .sort((a,b) => b[1]-a[1]).slice(0,100));
             }
         }
 
         function updateTotalDetections() {
-            fetch('/api/plates')
-                .then(response => response.json())
-                .then(data => {
-                    if (!data.error) {
-                        document.getElementById('totalDetections').textContent = data.length;
-                    }
-                })
-                .catch(error => console.error('Error fetching total detections:', error));
+            fetch('/api/plates').then(r => r.json())
+                .then(d => { if (!d.error) document.getElementById('totalDetections').textContent = d.length; })
+                .catch(() => {});
         }
 
-        // Initialize
-        document.addEventListener('DOMContentLoaded', () => {
-            updateTotalDetections();
-        });
+        document.addEventListener('DOMContentLoaded', () => updateTotalDetections());
     </script>
 </body>
 </html>

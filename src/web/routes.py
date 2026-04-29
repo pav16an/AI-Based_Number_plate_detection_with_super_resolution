@@ -40,25 +40,32 @@ def _import_numpy():
     return np
 
 
-def _ensure_runtime_services() -> None:
-    """Attach runtime services lazily to keep startup lightweight."""
+def _ensure_db() -> None:
+    """Attach the database manager lazily (lightweight — always safe)."""
     if not hasattr(current_app, "db_manager"):
         from src.db import DatabaseManager
-
         current_app.db_manager = DatabaseManager(current_app.config["DATABASE_PATH"])
+
+
+def _ensure_runtime_services() -> None:
+    """Attach all runtime services (DB + detection model) lazily."""
+    _ensure_db()
 
     if not hasattr(current_app, "detection_service"):
         from src.services import DetectionService
 
-        current_app.detection_service = DetectionService(
+        svc = DetectionService(
             yolo_model_path=current_app.config["MODEL_PATH"],
             device=current_app.config["MODEL_DEVICE"],
             ocr_language=current_app.config["OCR_LANGUAGE"],
             use_ocr_gpu=current_app.config["OCR_USE_GPU"],
         )
-
-        if not current_app.detection_service.initialize():
-            raise RuntimeError("Failed to initialize detection service")
+        if not svc.initialize():
+            raise RuntimeError(
+                "Failed to initialize detection service. "
+                "Check that the configured model path exists and all dependencies are installed."
+            )
+        current_app.detection_service = svc
 
 
 def _serialize_detection(detection: Dict[str, Any]) -> Dict[str, Any]:
@@ -176,6 +183,109 @@ def upload():
         return jsonify(payload), 500
 
 
+
+@web.route("/upload_video", methods=["POST"])
+def upload_video():
+    """Process an uploaded video: sample frames, detect plates, return summary."""
+    try:
+        if "file" not in request.files:
+            return jsonify({"error": "No file provided"}), 400
+
+        file = request.files["file"]
+        if not file.filename:
+            return jsonify({"error": "No file selected"}), 400
+
+        ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
+        video_exts = current_app.config.get("VIDEO_EXTENSIONS", {"mp4", "avi", "mov", "mkv", "webm"})
+        if ext not in video_exts:
+            return jsonify({"error": f"Unsupported video format: .{ext}"}), 400
+
+        _ensure_runtime_services()
+        cv2 = _import_cv2()
+
+        filename = secure_filename(file.filename)
+        upload_dir = current_app.config["UPLOAD_FOLDER"]
+        os.makedirs(upload_dir, exist_ok=True)
+        filepath = os.path.join(upload_dir, filename)
+        file.save(filepath)
+
+        cap = cv2.VideoCapture(filepath)
+        if not cap.isOpened():
+            return jsonify({"error": "Could not open video file"}), 400
+
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps_video = cap.get(cv2.CAP_PROP_FPS) or 25
+        duration_s = total_frames / fps_video if fps_video > 0 else 0
+        max_frames = current_app.config.get("VIDEO_MAX_FRAMES", 60)
+
+        # Evenly sample frames across the video
+        if total_frames <= max_frames:
+            sample_indices = list(range(total_frames))
+        else:
+            step = total_frames / max_frames
+            sample_indices = [int(i * step) for i in range(max_frames)]
+
+        all_plates: dict = {}
+        all_detections_list = []
+        frames_processed = 0
+        preview_frame = None
+        conf = max(0.25, current_app.config["DEFAULT_CONFIDENCE"])
+
+        for frame_idx in sample_indices:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+            ret, frame = cap.read()
+            if not ret or frame is None:
+                continue
+
+            detections = current_app.detection_service.detect_and_recognize(
+                frame, conf=conf, fast_mode=True
+            )
+            frames_processed += 1
+
+            if detections:
+                _save_valid_detections(detections, source="video", image_path=filepath)
+                timestamp_s = frame_idx / fps_video
+
+                for det in detections:
+                    text = det.get("text", "")
+                    det_conf = det.get("confidence", 0)
+                    ser = _serialize_detection(det)
+                    ser["timestamp"] = round(timestamp_s, 2)
+                    ser["frame"] = frame_idx
+                    all_detections_list.append(ser)
+                    if text and (text not in all_plates or det_conf > all_plates[text]):
+                        all_plates[text] = det_conf
+
+                if preview_frame is None:
+                    annotated = draw_detections(frame, detections, ["License"])
+                    ok, buf = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                    if ok:
+                        preview_frame = base64.b64encode(buf).decode("utf-8")
+
+        cap.release()
+
+        return jsonify({
+            "success": True,
+            "frames_processed": frames_processed,
+            "total_frames": total_frames,
+            "duration_seconds": round(duration_s, 2),
+            "license_plates": list(all_plates.keys()),
+            "plate_confidences": {k: round(v, 3) for k, v in all_plates.items()},
+            "detections": all_detections_list,
+            "count": len(all_plates),
+            "preview": preview_frame,
+        })
+
+    except RuntimeError as exc:
+        logger.error("Video upload unavailable: %s", exc)
+        return jsonify({"error": str(exc)}), 503
+    except Exception as exc:
+        logger.error("Video upload failed: %s", exc, exc_info=True)
+        payload = {"error": "Video processing failed"}
+        if _should_expose_error_details():
+            payload["details"] = str(exc)
+        return jsonify(payload), 500
+
 @web.route("/process_frame", methods=["POST"])
 def process_frame():
     try:
@@ -196,7 +306,8 @@ def process_frame():
             return jsonify({"success": False, "error": "Failed to decode frame"}), 400
 
         confidence = request.form.get("confidence", type=float, default=current_app.config["DEFAULT_CONFIDENCE"])
-        detections = current_app.detection_service.detect_and_recognize(image, conf=confidence)
+        fast_mode = request.form.get("fast_mode", "false").lower() == "true"
+        detections = current_app.detection_service.detect_and_recognize(image, conf=confidence, fast_mode=fast_mode)
         _save_valid_detections(detections, source="webcam")
 
         return jsonify(
@@ -219,14 +330,14 @@ def process_frame():
 
 @web.route("/api/plates", methods=["GET"])
 def list_plates():
-    _ensure_runtime_services()
+    _ensure_db()
     detections = current_app.db_manager.get_all_detections(limit=500, offset=0)
     return jsonify([item.to_dict() for item in detections]), 200
 
 
 @web.route("/api/plates/<int:detection_id>", methods=["DELETE"])
 def delete_plate(detection_id: int):
-    _ensure_runtime_services()
+    _ensure_db()
     deleted = current_app.db_manager.delete_detection(detection_id)
     if not deleted:
         return jsonify({"success": False, "error": "Record not found"}), 404
@@ -235,7 +346,7 @@ def delete_plate(detection_id: int):
 
 @web.route("/api/plates/bulk-delete", methods=["POST"])
 def bulk_delete_plates():
-    _ensure_runtime_services()
+    _ensure_db()
     payload = request.get_json(silent=True) or {}
     raw_ids = payload.get("ids", [])
 
