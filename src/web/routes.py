@@ -247,6 +247,8 @@ def upload_video():
                 continue
 
             # Downscale to frame_max_w — matches YOLO fast_mode imgsz=640 exactly,
+            import gc
+
             # cutting inference time significantly for HD/1080p source videos.
             fh, fw = frame.shape[:2]
             if fw > frame_max_w:
@@ -281,6 +283,10 @@ def upload_video():
                     ok, buf = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 80])
                     if ok:
                         preview_frame = base64.b64encode(buf).decode("utf-8")
+                        
+            # Force garbage collection to prevent memory ballooning during video loop
+            del frame
+            gc.collect()
 
         cap.release()
 

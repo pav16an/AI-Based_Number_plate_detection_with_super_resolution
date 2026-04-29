@@ -68,6 +68,9 @@ class Config:
     MAX_WORKERS = int(os.environ.get('MAX_WORKERS', 4))
     REQUEST_TIMEOUT = int(os.environ.get('REQUEST_TIMEOUT', 60))  # seconds
     
+    # Aggressive Video Limits for Render Free Tier
+    VIDEO_MAX_FRAMES = int(os.environ.get('VIDEO_MAX_FRAMES', 10))
+    VIDEO_FRAME_MAX_WIDTH = int(os.environ.get('VIDEO_FRAME_MAX_WIDTH', 480))
     # Security settings
     CORS_ORIGINS = os.environ.get('CORS_ORIGINS', 'http://localhost:3000,http://localhost:5000')
     RATE_LIMIT_ENABLED = os.environ.get('RATE_LIMIT_ENABLED', 'True').lower() == 'true'
