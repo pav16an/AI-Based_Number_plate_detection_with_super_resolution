@@ -31,11 +31,21 @@ RUN mkdir -p logs uploads data
 ENV FLASK_ENV=production
 ENV PYTHONUNBUFFERED=1
 ENV PORT=5000
-ENV WORKERS=2
+ENV WORKERS=1
+
+# Enforce single threading to prevent massive memory spikes on Render free tier
+ENV OMP_NUM_THREADS=1
+ENV MKL_NUM_THREADS=1
+ENV OPENBLAS_NUM_THREADS=1
+ENV VECLIB_MAXIMUM_THREADS=1
+ENV NUMEXPR_NUM_THREADS=1
+
+# Pre-download EasyOCR weights during build to prevent timeout on the first upload
+RUN python -c "import easyocr; reader = easyocr.Reader(['en'], gpu=False)"
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD python -c "import requests; requests.get('http://localhost:5000/health')" || exit 1
 
 # Run application with gunicorn
-CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${PORT:-5000} --workers ${WORKERS:-2} --timeout 120 --access-logfile - --error-logfile - app:app"]
+CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${PORT:-5000} --workers ${WORKERS:-1} --timeout 120 --access-logfile - --error-logfile - app:app"]

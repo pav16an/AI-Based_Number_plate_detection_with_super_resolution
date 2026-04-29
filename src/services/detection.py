@@ -321,7 +321,7 @@ class YOLODetector(ModelLoader):
             else:
                 image_height, image_width = image.shape[:2]
                 max_side = max(image_height, image_width)
-                imgsz = min(1280, max(640, ((max_side + 31) // 32) * 32))
+                imgsz = min(960, max(640, ((max_side + 31) // 32) * 32))
 
             results = self.model(
                 image,
