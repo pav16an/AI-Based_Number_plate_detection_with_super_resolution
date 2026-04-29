@@ -321,7 +321,7 @@ class YOLODetector(ModelLoader):
             else:
                 image_height, image_width = image.shape[:2]
                 max_side = max(image_height, image_width)
-                imgsz = min(960, max(640, ((max_side + 31) // 32) * 32))
+                imgsz = min(640, max(640, ((max_side + 31) // 32) * 32))
 
             results = self.model(
                 image,
@@ -835,9 +835,10 @@ class DetectionService:
         # Full image lower conf
         retries.append((image, lower_conf, 0, 0, 1.0))
 
-        # Upscale the whole image for small plate recovery.
-        upscaled = cv2.resize(image, (w * 2, h * 2), interpolation=cv2.INTER_CUBIC)
-        retries.append((upscaled, lower_conf, 0, 0, 2.0))
+        # Upscale the whole image for small plate recovery, ONLY if image is small to prevent OOM
+        if w < 1280 and h < 1280:
+            upscaled = cv2.resize(image, (w * 2, h * 2), interpolation=cv2.INTER_CUBIC)
+            retries.append((upscaled, lower_conf, 0, 0, 2.0))
 
         # Contrast-enhanced retry can recover low-contrast or dim plates.
         enhanced = ImagePreprocessor.enhance_contrast(image, alpha=1.35, beta=18)

@@ -141,6 +141,13 @@ def upload():
         if image is None:
             return jsonify({"error": "Failed to decode uploaded image"}), 400
 
+        # OOM Prevention: Cap maximum image dimension before any processing
+        h, w = image.shape[:2]
+        max_dim = max(h, w)
+        if max_dim > 1280:
+            scale = 1280 / max_dim
+            image = cv2.resize(image, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
+
         upload_dir = current_app.config["UPLOAD_FOLDER"]
         os.makedirs(upload_dir, exist_ok=True)
         filepath = os.path.join(upload_dir, filename)
