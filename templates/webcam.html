@@ -491,10 +491,10 @@
             if (processingTimeout) clearTimeout(processingTimeout);
             processingTimeout = setTimeout(() => { processingFrame = false; }, 10000);
 
-            // Downscale to max 800 px wide for speed
+            // Downscale to max 640 px wide — matches YOLO fast_mode imgsz=640 exactly
             const srcW  = videoElement.videoWidth;
             const srcH  = videoElement.videoHeight;
-            const ratio = Math.min(1, 800 / srcW);
+            const ratio = Math.min(1, 640 / srcW);
             const sendW = Math.round(srcW * ratio);
             const sendH = Math.round(srcH * ratio);
 

@@ -25,16 +25,19 @@ class Config:
     MAX_CONTENT_LENGTH = int(os.environ.get('MAX_CONTENT_LENGTH', 200 * 1024 * 1024))  # 200MB (supports video)
     ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'mp4', 'avi', 'mov', 'mkv', 'webm'}
     VIDEO_EXTENSIONS = {'mp4', 'avi', 'mov', 'mkv', 'webm'}
-    VIDEO_MAX_FRAMES = int(os.environ.get('VIDEO_MAX_FRAMES', 60))  # Max frames to sample per video
+    # Reduced from 60 → 30 for much faster video processing
+    VIDEO_MAX_FRAMES = int(os.environ.get('VIDEO_MAX_FRAMES', 30))
+    # Downscale video frames to this width before inference (matches YOLO fast_mode imgsz=640)
+    VIDEO_FRAME_MAX_WIDTH = int(os.environ.get('VIDEO_FRAME_MAX_WIDTH', 640))
     
     # Database settings
     DATABASE_PATH = os.environ.get('DATABASE_PATH', str(BASE_DIR / 'data' / 'app.db'))
     DATABASE_URL = os.environ.get('DATABASE_URL', f'sqlite:///{DATABASE_PATH}')
     
     # Model settings
-    MODEL_PATH = os.environ.get('MODEL_PATH', str(BASE_DIR / 'weights' / 'yolov10-license-plate.pt'))
+    MODEL_PATH = os.environ.get('MODEL_PATH', str(BASE_DIR / 'weights' / 'best.pt'))
     FALLBACK_MODEL = 'yolov8n.pt'
-    DEFAULT_CONFIDENCE = float(os.environ.get('DEFAULT_CONFIDENCE', 0.35))
+    DEFAULT_CONFIDENCE = float(os.environ.get('DEFAULT_CONFIDENCE', 0.20))
     MODEL_DEVICE = os.environ.get('MODEL_DEVICE', 'cpu')  # 'cpu' or 'cuda'
     
     # OCR settings

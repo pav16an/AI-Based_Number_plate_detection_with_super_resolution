@@ -183,7 +183,6 @@ def upload():
         return jsonify(payload), 500
 
 
-
 @web.route("/upload_video", methods=["POST"])
 def upload_video():
     """Process an uploaded video: sample frames, detect plates, return summary."""
@@ -216,7 +215,10 @@ def upload_video():
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         fps_video = cap.get(cv2.CAP_PROP_FPS) or 25
         duration_s = total_frames / fps_video if fps_video > 0 else 0
-        max_frames = current_app.config.get("VIDEO_MAX_FRAMES", 60)
+
+        # Config-driven limits — defaults: 30 frames, 640px max width
+        max_frames = current_app.config.get("VIDEO_MAX_FRAMES", 30)
+        frame_max_w = current_app.config.get("VIDEO_FRAME_MAX_WIDTH", 640)
 
         # Evenly sample frames across the video
         if total_frames <= max_frames:
@@ -236,6 +238,17 @@ def upload_video():
             ret, frame = cap.read()
             if not ret or frame is None:
                 continue
+
+            # Downscale to frame_max_w — matches YOLO fast_mode imgsz=640 exactly,
+            # cutting inference time significantly for HD/1080p source videos.
+            fh, fw = frame.shape[:2]
+            if fw > frame_max_w:
+                scale = frame_max_w / fw
+                frame = cv2.resize(
+                    frame,
+                    (frame_max_w, max(1, int(fh * scale))),
+                    interpolation=cv2.INTER_LINEAR,
+                )
 
             detections = current_app.detection_service.detect_and_recognize(
                 frame, conf=conf, fast_mode=True
@@ -285,6 +298,7 @@ def upload_video():
         if _should_expose_error_details():
             payload["details"] = str(exc)
         return jsonify(payload), 500
+
 
 @web.route("/process_frame", methods=["POST"])
 def process_frame():

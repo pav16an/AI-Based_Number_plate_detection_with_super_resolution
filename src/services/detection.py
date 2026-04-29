@@ -221,22 +221,18 @@ def _register_ultralytics_compatibility_shims() -> None:
             _base = _E2EDetectLoss or _v8DetectionLoss
             if _base is not None:
                 class v10DetectLoss(_base):
-                    """YOLOv10 detection loss compatibility shim."""
                     pass
             else:
                 import torch.nn as _nn
                 class v10DetectLoss(_nn.Module):
-                    """Minimal v10DetectLoss placeholder for checkpoint loading."""
                     def __init__(self, *args, **kwargs):
                         super().__init__()
                     def forward(self, *args, **kwargs):
-                        raise NotImplementedError("v10DetectLoss is a compatibility shim.")
-
+                        raise NotImplementedError()
             ultralytics_loss.v10DetectLoss = v10DetectLoss
-            logger.info("Registered v10DetectLoss compatibility shim")
+            logger.info('Registered v10DetectLoss compatibility shim')
     except Exception as _shim_exc:
-        logger.debug("Could not register v10DetectLoss shim: %s", _shim_exc)
-
+        logger.debug('Could not register v10DetectLoss shim: %s', _shim_exc)
 
 class ModelLoader(ABC):
     """Abstract base class for model loading"""
@@ -297,7 +293,8 @@ class YOLODetector(ModelLoader):
             logger.error(f"Error loading YOLO model: {e}")
             return False
     
-    def predict(self, image: Any, conf: Optional[float] = None, iou: float = 0.45, max_det: int = 50) -> List[Dict]:
+    def predict(self, image: Any, conf: Optional[float] = None, iou: float = 0.45,
+                max_det: int = 50, fast_mode: bool = False) -> List[Dict]:
         """
         Detect license plates in image
         
@@ -306,6 +303,7 @@ class YOLODetector(ModelLoader):
             conf: Confidence threshold (uses default if None)
             iou: IoU threshold for non-max suppression
             max_det: Maximum number of detections to return
+            fast_mode: If True, use smaller imgsz (640) for much faster inference
             
         Returns:
             List of detections with bounding boxes and confidence
@@ -316,9 +314,14 @@ class YOLODetector(ModelLoader):
         
         try:
             confidence = conf or self.confidence
-            image_height, image_width = image.shape[:2]
-            max_side = max(image_height, image_width)
-            imgsz = min(1600, max(960, ((max_side + 31) // 32) * 32))
+            # Use 640 for real-time/fast-mode (≈3× faster than 960+).
+            # Use 960 for high-quality single-image uploads only.
+            if fast_mode:
+                imgsz = 640
+            else:
+                image_height, image_width = image.shape[:2]
+                max_side = max(image_height, image_width)
+                imgsz = min(1280, max(640, ((max_side + 31) // 32) * 32))
 
             results = self.model(
                 image,
@@ -340,7 +343,7 @@ class YOLODetector(ModelLoader):
                     }
                     detections.append(detection)
             
-            logger.debug(f"Detected {len(detections)} license plates")
+            logger.debug(f"Detected {len(detections)} license plates (imgsz={imgsz})")
             return detections
         except Exception as e:
             logger.error(f"Error during detection: {e}")
@@ -349,6 +352,9 @@ class YOLODetector(ModelLoader):
 
 class OCREngine(ModelLoader):
     """OCR engine for license plate recognition"""
+
+    # Bounded LRU-style cache: maps crop-hash → (text, confidence)
+    _OCR_CACHE_MAX = 128
     
     def __init__(self, language: str = 'en', use_gpu: bool = False):
         """
@@ -362,6 +368,8 @@ class OCREngine(ModelLoader):
         self.use_gpu = use_gpu
         self.reader = None
         self.allowed_chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+        # OCR result cache: crop_hash → (text, confidence)
+        self._ocr_cache: Dict[int, Tuple[str, float]] = {}
         self.char_substitutions = {
             '0': ['O', 'D', 'Q'],
             '1': ['I', 'L'],
@@ -421,23 +429,49 @@ class OCREngine(ModelLoader):
         except Exception as e:
             logger.error(f"Error during OCR: {e}")
             return ""
+
+    def _crop_hash(self, image: Any) -> int:
+        """Fast hash of a crop array for cache keying."""
+        try:
+            np = _import_numpy()
+            # Downsample to a tiny thumbnail before hashing for speed
+            small = image[::4, ::4] if image.ndim == 2 else image[::4, ::4, 0]
+            return hash(small.tobytes())
+        except Exception:
+            return 0
     
     def recognize_with_confidence(self, image: Any, fast_mode: bool = False) -> Tuple[str, float]:
         """
-        Recognize text with confidence score from multiple OCR variants
+        Recognize text with confidence score from multiple OCR variants.
+
+        fast_mode=True  → 2 variants (original + 1 enhanced).  Fastest, good for video/webcam.
+        fast_mode=False → 7 variants.  Best accuracy, used for single-image uploads.
         
         Args:
             image: Input image
-            fast_mode: If True, do not generate multiple OCR variants
+            fast_mode: If True, use fewer OCR variants for speed
             
         Returns:
             Tuple of (text, confidence)
         """
         try:
+            # ── Cache lookup ────────────────────────────────────────────────────
+            crop_hash = self._crop_hash(image)
+            if crop_hash and crop_hash in self._ocr_cache:
+                logger.debug("OCR cache hit")
+                return self._ocr_cache[crop_hash]
+
+            # ── Build variant list ──────────────────────────────────────────────
             if fast_mode:
-                candidates = [image]
+                # 2 variants: original + one contrast-enhanced pass
+                try:
+                    enhanced = ImagePreprocessor.enhance_contrast(image, alpha=1.5, beta=20)
+                    candidates = [image, enhanced]
+                except Exception:
+                    candidates = [image]
             else:
                 candidates = [image] + ImagePreprocessor.generate_ocr_variants(image)
+
             candidate_scores = defaultdict(float)
             candidate_confidences: Dict[str, float] = {}
             
@@ -462,13 +496,22 @@ class OCREngine(ModelLoader):
                         )
 
             if not candidate_scores:
-                return "", 0.0
+                result = ("", 0.0)
+            else:
+                best_text = max(
+                    candidate_scores,
+                    key=lambda item: (candidate_scores[item], candidate_confidences.get(item, 0.0), len(item), item),
+                )
+                result = (best_text, candidate_confidences.get(best_text, 0.0))
 
-            best_text = max(
-                candidate_scores,
-                key=lambda item: (candidate_scores[item], candidate_confidences.get(item, 0.0), len(item)),
-            )
-            return best_text, candidate_confidences.get(best_text, 0.0)
+            # ── Cache store (bounded) ───────────────────────────────────────────
+            if crop_hash:
+                if len(self._ocr_cache) >= self._OCR_CACHE_MAX:
+                    # Evict oldest entry
+                    self._ocr_cache.pop(next(iter(self._ocr_cache)))
+                self._ocr_cache[crop_hash] = result
+
+            return result
         except Exception as e:
             logger.error(f"Error in recognition with confidence: {e}")
             return "", 0.0
@@ -485,7 +528,7 @@ class OCREngine(ModelLoader):
                 candidate = normalized[:index] + replacement + normalized[index + 1:]
                 candidates.add(candidate)
 
-        return list(candidates)
+        return sorted(list(candidates))
 
     def _score_candidate(self, text: str, confidence: float) -> float:
         """Score a candidate plate string using OCR confidence and plate heuristics."""
@@ -762,22 +805,21 @@ class DetectionService:
 
     def _run_detection_passes(self, image: Any, conf: Optional[float] = None, fast_mode: bool = False) -> List[Dict]:
         """
-        Run multiple detector passes to recover small or low-contrast plates.
+        Run detector passes to find license plates.
+        fast_mode: single pass at imgsz=640 — used for video/webcam.
+        normal:    multi-pass with fallbacks — used for image uploads.
         """
-        base_conf = conf if conf is not None else getattr(self.detector, 'confidence', 0.6)
-        
+        base_conf = conf if conf is not None else getattr(self.detector, 'confidence', 0.35)
+
         all_detections: List[Dict] = []
-        
-        # Initial pass
-        initial_detections = self.detector.predict(image, base_conf)
+
+        # Initial pass — fast_mode controls YOLO imgsz (640 vs 960)
+        initial_detections = self.detector.predict(image, base_conf, fast_mode=fast_mode)
         if initial_detections:
             all_detections.extend(initial_detections)
 
-        # Fallback passes are mainly for recovering missed small or low-contrast plates.
-        if initial_detections:
-            return self._deduplicate_detections(all_detections)
-            
-        if fast_mode:
+        # In fast_mode, skip expensive fallback passes
+        if initial_detections or fast_mode:
             return self._deduplicate_detections(all_detections)
 
         try:
@@ -820,7 +862,7 @@ class DetectionService:
                 retries.append((crop_upscaled, lower_conf, crop_x1, crop_y1, 2.0))
 
         for retry_image, retry_conf, offset_x, offset_y, scale in retries:
-            retry_detections = self.detector.predict(retry_image, retry_conf)
+            retry_detections = self.detector.predict(retry_image, retry_conf, fast_mode=False)
             for detection in retry_detections:
                 x1, y1, x2, y2 = [int(v) for v in detection['bbox']]
                 if scale != 1.0:
