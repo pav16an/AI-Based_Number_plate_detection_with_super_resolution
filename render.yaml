@@ -15,7 +15,7 @@ services:
       - key: PORT
         value: "10000"
       - key: WORKERS
-        value: "2"
+        value: "1"
       - key: DATABASE_PATH
         value: /app/data/app.db
       - key: MODEL_PATH
