@@ -25,6 +25,20 @@ logger = get_logger(__name__)
 api_v1 = Blueprint('api_v1', __name__, url_prefix='/api/v1')
 
 
+def _serialize_api_detection(detection: dict) -> dict:
+    """Convert detection payloads to JSON-safe primitives."""
+    bbox = detection.get('bbox', [])
+    if hasattr(bbox, 'tolist'):
+        bbox = bbox.tolist()
+
+    return {
+        'bbox': [int(value) for value in bbox],
+        'confidence': float(detection.get('confidence', 0.0)),
+        'text': detection.get('text', ''),
+        'ocr_confidence': float(detection.get('ocr_confidence', 0.0)),
+    }
+
+
 @api_v1.before_request
 def init_services():
     """Initialize shared lightweight services before each request."""
@@ -121,7 +135,7 @@ def detect_image():
                 db_manager.save_detection(record)
         
         return jsonify({
-            'detections': detections,
+            'detections': [_serialize_api_detection(item) for item in detections],
             'count': len(detections),
             'image_path': filepath,
             'success': True
@@ -165,7 +179,7 @@ def detect_webcam():
         result_frame = base64.b64encode(buffer).decode()
         
         return jsonify({
-            'detections': detections,
+            'detections': [_serialize_api_detection(item) for item in detections],
             'frame': f'data:image/jpeg;base64,{result_frame}',
             'count': len(detections),
             'success': True

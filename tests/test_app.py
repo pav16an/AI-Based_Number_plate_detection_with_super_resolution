@@ -4,6 +4,7 @@ Unit tests for License Plate Detection System
 
 import pytest
 import json
+import io
 import numpy as np
 import src.services.detection as detection_module
 from src.utils import LicensePlateValidator, ImageValidator
@@ -186,6 +187,36 @@ class TestAPI:
         data = json.loads(response.data)
         assert 'version' in data
         assert 'name' in data
+
+    def test_detect_image_serializes_numpy_bboxes(self, app, client, monkeypatch):
+        """API image detection should return JSON-safe bbox values."""
+        class StubDetectionService:
+            def detect_and_recognize(self, image, conf=None, fast_mode=False):
+                return [{
+                    'bbox': np.array([10, 20, 30, 40]),
+                    'confidence': 0.91,
+                    'text': 'ABC1234',
+                    'ocr_confidence': 0.88,
+                }]
+
+        monkeypatch.setattr('src.api.routes_v1.ensure_detection_service', lambda: None)
+        app.detection_service = StubDetectionService()
+
+        import cv2
+        image = np.zeros((20, 40, 3), dtype=np.uint8)
+        ok, encoded = cv2.imencode('.png', image)
+        assert ok is True
+
+        response = client.post(
+            '/api/v1/detect/image',
+            data={'file': (io.BytesIO(encoded.tobytes()), 'sample.png')},
+            content_type='multipart/form-data'
+        )
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data['success'] is True
+        assert data['detections'][0]['bbox'] == [10, 20, 30, 40]
 
 
 class TestOCREngineHeuristics:
