@@ -232,8 +232,9 @@ class OCREngine(ModelLoader):
             import pytesseract
             from pytesseract import Output
             
-            # Configure Tesseract to look for a single line of text and restrict characters
-            custom_config = f'-c tessedit_char_whitelist={self.allowed_chars} --psm 7'
+            # Configure Tesseract to look for sparse text and restrict characters. 
+            # PSM 11 (Sparse text) is far more accurate for multi-line or noisy plates than PSM 7 (single line).
+            custom_config = f'-c tessedit_char_whitelist={self.allowed_chars} --psm 11'
             
             if detail:
                 data = pytesseract.image_to_data(image, output_type=Output.DICT, config=custom_config)
@@ -303,20 +304,26 @@ class OCREngine(ModelLoader):
                 if not results:
                     continue
                 
-                for bbox, text, conf in results:
-                    clean_text = LicensePlateValidator.clean_text(text)
-                    if not clean_text:
-                        continue
+                # Combine all text fragments found in this crop variant
+                combined_text = "".join([t for _, t, _ in results])
+                if not combined_text:
+                    continue
+                    
+                avg_conf = sum([c for _, _, c in results]) / len(results)
+                
+                clean_text = LicensePlateValidator.clean_text(combined_text)
+                if not clean_text:
+                    continue
 
-                    for candidate_text in self._generate_candidate_texts(clean_text):
-                        score = self._score_candidate(candidate_text, float(conf))
-                        if score <= 0:
-                            continue
-                        candidate_scores[candidate_text] += score
-                        candidate_confidences[candidate_text] = max(
-                            candidate_confidences.get(candidate_text, 0.0),
-                            float(conf),
-                        )
+                for candidate_text in self._generate_candidate_texts(clean_text):
+                    score = self._score_candidate(candidate_text, avg_conf)
+                    if score <= 0:
+                        continue
+                    candidate_scores[candidate_text] += score
+                    candidate_confidences[candidate_text] = max(
+                        candidate_confidences.get(candidate_text, 0.0),
+                        avg_conf,
+                    )
 
             if not candidate_scores:
                 result = ("", 0.0)
