@@ -34,205 +34,7 @@ def _import_numpy():
     return np
 
 
-def _register_ultralytics_compatibility_shims() -> None:
-    """Register compatibility shims for checkpoints trained with other Ultralytics builds."""
-    import torch
-    import torch.nn as nn
-    from ultralytics.nn import tasks as ultralytics_tasks
-    from ultralytics.nn.modules import block as ultralytics_block
-
-    # ── 1. YOLOv10DetectionModel alias ───────────────────────────────────────
-    if not hasattr(ultralytics_tasks, 'YOLOv10DetectionModel') and hasattr(ultralytics_tasks, 'DetectionModel'):
-        ultralytics_tasks.YOLOv10DetectionModel = ultralytics_tasks.DetectionModel
-        logger.info("Registered YOLOv10DetectionModel compatibility alias")
-
-    Conv = ultralytics_block.Conv
-
-    # ── 2. SCDown ─────────────────────────────────────────────────────────────
-    if not hasattr(ultralytics_block, 'SCDown'):
-        class SCDown(nn.Module):
-            """Spatial-Channel Downsample (YOLOv10)."""
-            def __init__(self, c1: int, c2: int, k: int = 3, s: int = 2, *args, **kwargs):
-                super().__init__()
-                self.cv1 = Conv(c1, c2, 1, 1)
-                self.cv2 = Conv(c2, c2, k, s, g=c2, act=False)
-
-            def forward(self, x):
-                return self.cv2(self.cv1(x))
-
-        ultralytics_block.SCDown = SCDown
-        logger.info("Registered SCDown compatibility shim")
-
-    # ── 3. Attention (needed by PSA) ──────────────────────────────────────────
-    if not hasattr(ultralytics_block, 'Attention'):
-        class Attention(nn.Module):
-            """Multi-head self-attention used inside PSA (YOLOv10)."""
-            def __init__(self, dim: int, num_heads: int = 8, attn_ratio: float = 0.5):
-                super().__init__()
-                self.num_heads = num_heads
-                self.head_dim = dim // num_heads
-                self.key_dim = int(self.head_dim * attn_ratio)
-                self.scale = self.key_dim ** -0.5
-                nh_kd = self.key_dim * num_heads
-                h = dim + nh_kd * 2
-                self.qkv = Conv(dim, h, 1, act=False)
-                self.proj = Conv(dim, dim, 1, act=False)
-                self.pe = Conv(dim, dim, 3, 1, g=dim, act=False)
-
-            def forward(self, x):
-                B, C, H, W = x.shape
-                N = H * W
-                qkv = self.qkv(x)
-                q, k, v = qkv.view(B, self.num_heads, self.key_dim * 2 + self.head_dim, N).split(
-                    [self.key_dim, self.key_dim, self.head_dim], dim=2
-                )
-                attn = (q.transpose(-2, -1) @ k) * self.scale
-                attn = attn.softmax(dim=-1)
-                x = (v @ attn.transpose(-2, -1)).view(B, C, H, W) + self.pe(v.reshape(B, C, H, W))
-                return self.proj(x)
-
-        ultralytics_block.Attention = Attention
-        logger.info("Registered Attention compatibility shim")
-
-    # ── 4. PSA (Partial Self-Attention) ───────────────────────────────────────
-    if not hasattr(ultralytics_block, 'PSA'):
-        _Attention = ultralytics_block.Attention
-
-        class PSA(nn.Module):
-            """Partial Self-Attention block (YOLOv10)."""
-            def __init__(self, c1: int, c2: int, e: float = 0.5):
-                super().__init__()
-                assert c1 == c2
-                self.c = int(c1 * e)
-                self.cv1 = Conv(c1, 2 * self.c, 1, 1)
-                self.cv2 = Conv(2 * self.c, c1, 1)
-                self.attn = _Attention(self.c, attn_ratio=0.5, num_heads=max(1, self.c // 64))
-                self.ffn = nn.Sequential(
-                    Conv(self.c, self.c * 2, 1),
-                    Conv(self.c * 2, self.c, 1, act=False),
-                )
-
-            def forward(self, x):
-                a, b = self.cv1(x).split((self.c, self.c), dim=1)
-                b = b + self.attn(b)
-                b = b + self.ffn(b)
-                return self.cv2(torch.cat((a, b), 1))
-
-        ultralytics_block.PSA = PSA
-        logger.info("Registered PSA compatibility shim")
-
-    # ── 5. CIB (Compact Inverted Block) ───────────────────────────────────────
-    if not hasattr(ultralytics_block, 'CIB'):
-        class CIB(nn.Module):
-            """Compact Inverted Block (YOLOv10)."""
-            def __init__(self, c1: int, c2: int, shortcut: bool = True,
-                         e: float = 0.5, lk: bool = False):
-                super().__init__()
-                c_ = int(c2 * e)
-                self.cv1 = nn.Sequential(
-                    Conv(c1, c1, 3, g=c1),
-                    Conv(c1, 2 * c_, 1),
-                    Conv(2 * c_, 2 * c_, 3, g=2 * c_) if not lk else Conv(2 * c_, 2 * c_, 3, g=2 * c_),
-                    Conv(2 * c_, c2, 1),
-                    Conv(c2, c2, 3, g=c2),
-                )
-                self.add = shortcut and c1 == c2
-
-            def forward(self, x):
-                return x + self.cv1(x) if self.add else self.cv1(x)
-
-        ultralytics_block.CIB = CIB
-        logger.info("Registered CIB compatibility shim")
-
-    # ── 6. C2fCIB ─────────────────────────────────────────────────────────────
-    if not hasattr(ultralytics_block, 'C2fCIB') and hasattr(ultralytics_block, 'C2f'):
-        _C2f = ultralytics_block.C2f
-        _CIB = ultralytics_block.CIB
-
-        class C2fCIB(_C2f):
-            """C2f with CIB bottleneck (YOLOv10)."""
-            def __init__(self, c1: int, c2: int, n: int = 1,
-                         shortcut: bool = False, lk: bool = False,
-                         g: int = 1, e: float = 0.5):
-                super().__init__(c1, c2, n, shortcut, g, e)
-                self.m = nn.ModuleList(
-                    _CIB(self.c, self.c, shortcut, e=1.0, lk=lk) for _ in range(n)
-                )
-
-        ultralytics_block.C2fCIB = C2fCIB
-        logger.info("Registered C2fCIB compatibility shim")
-
-    # ── 7. RepVGGDW ───────────────────────────────────────────────────────────
-    if not hasattr(ultralytics_block, 'RepVGGDW'):
-        class RepVGGDW(nn.Module):
-            """Reparameterizable VGG-style depthwise conv block (YOLOv10)."""
-            def __init__(self, ed: int):
-                super().__init__()
-                self.conv = Conv(ed, ed, 7, 1, 3, g=ed, act=False)
-                self.conv1 = Conv(ed, ed, 3, 1, 1, g=ed, act=False)
-                self.dim = ed
-                self.act = nn.SiLU()
-
-            def forward(self, x):
-                return self.act(self.conv(x) + self.conv1(x))
-
-            def forward_fuse(self, x):
-                return self.act(self.conv(x))
-
-        ultralytics_block.RepVGGDW = RepVGGDW
-        logger.info("Registered RepVGGDW compatibility shim")
-
-    # ── 8. v10Detect head ─────────────────────────────────────────────────────
-    try:
-        from ultralytics.nn.modules import head as ultralytics_head
-        if not hasattr(ultralytics_head, 'v10Detect') and hasattr(ultralytics_head, 'Detect'):
-            _Detect = ultralytics_head.Detect
-
-            class v10Detect(_Detect):
-                """YOLOv10 dual-assignment detection head compatibility shim."""
-                max_det: int = 300
-
-                def __init__(self, nc: int = 80, ch: tuple = ()):
-                    super().__init__(nc, ch)
-                    c2 = max(ch[0] // 4, self.reg_max * 4, 16) if ch else 16
-                    c3 = max(ch[0], min(self.nc, 100)) if ch else 100
-                    self.one2one_cv2 = nn.ModuleList(
-                        nn.Sequential(Conv(x, c2, 3), Conv(c2, c2, 3),
-                                      nn.Conv2d(c2, 4 * self.reg_max, 1)) for x in ch
-                    )
-                    self.one2one_cv3 = nn.ModuleList(
-                        nn.Sequential(Conv(x, c3, 3), Conv(c3, c3, 3),
-                                      nn.Conv2d(c3, self.nc, 1)) for x in ch
-                    )
-
-            ultralytics_head.v10Detect = v10Detect
-            # Also expose via tasks module so pickle finds it
-            ultralytics_tasks.v10Detect = v10Detect
-            logger.info("Registered v10Detect compatibility shim")
-    except Exception as _shim_exc:
-        logger.debug("Could not register v10Detect shim: %s", _shim_exc)
-
-    # ── 9. v10DetectLoss (stored in checkpoint's loss attribute) ──────────────
-    try:
-        from ultralytics.utils import loss as ultralytics_loss
-        if not hasattr(ultralytics_loss, 'v10DetectLoss'):
-            _E2EDetectLoss = getattr(ultralytics_loss, 'E2EDetectLoss', None)
-            _v8DetectionLoss = getattr(ultralytics_loss, 'v8DetectionLoss', None)
-            _base = _E2EDetectLoss or _v8DetectionLoss
-            if _base is not None:
-                class v10DetectLoss(_base):
-                    pass
-            else:
-                import torch.nn as _nn
-                class v10DetectLoss(_nn.Module):
-                    def __init__(self, *args, **kwargs):
-                        super().__init__()
-                    def forward(self, *args, **kwargs):
-                        raise NotImplementedError()
-            ultralytics_loss.v10DetectLoss = v10DetectLoss
-            logger.info('Registered v10DetectLoss compatibility shim')
-    except Exception as _shim_exc:
-        logger.debug('Could not register v10DetectLoss shim: %s', _shim_exc)
+# Ultralytics shims removed (migrated to ONNX Runtime)
 
 class ModelLoader(ABC):
     """Abstract base class for model loading"""
@@ -249,104 +51,116 @@ class ModelLoader(ABC):
 
 
 class YOLODetector(ModelLoader):
-    """YOLO detector for license plates"""
+    """YOLO detector for license plates using pure ONNX Runtime (Zero PyTorch footprint)"""
     
     def __init__(self, model_path: str, device: str = 'cpu', confidence: float = 0.6):
         """
-        Initialize YOLO detector
+        Initialize YOLO ONNX detector
         
         Args:
-            model_path: Path to YOLO model weights
+            model_path: Path to YOLO model weights (should be .onnx)
             device: 'cpu' or 'cuda'
             confidence: Confidence threshold
         """
         self.model_path = model_path
+        if self.model_path.endswith('.pt'):
+            self.model_path = self.model_path.replace('.pt', '.onnx')
         self.device = device
         self.confidence = confidence
-        self.model = None
-        self.fallback_model = 'yolov8n.pt'
+        self.session = None
     
     def load(self) -> bool:
-        """Load YOLO model"""
+        """Load ONNX model"""
         try:
-            from ultralytics import YOLO
-            _register_ultralytics_compatibility_shims()
-            
-            # Try to load custom model
+            import onnxruntime as ort
             if os.path.exists(self.model_path):
-                self.model = YOLO(self.model_path)
-                logger.info(f"Custom YOLO model loaded from {self.model_path}")
+                self.session = ort.InferenceSession(self.model_path, providers=['CPUExecutionProvider'])
+                logger.info(f"ONNX YOLO model loaded from {self.model_path}")
             else:
-                logger.warning(f"Model not found at {self.model_path}, using fallback")
-                self.model = YOLO(self.fallback_model)
-                logger.info(f"Fallback YOLO model loaded: {self.fallback_model}")
-
-            # Fuse layers for faster and slightly more accurate inference if available
-            if hasattr(self.model, 'fuse'):
-                try:
-                    self.model.fuse()
-                    logger.debug("Fused YOLO model layers for optimized inference")
-                except Exception:
-                    logger.debug("YOLO model fusion not available")
+                logger.error(f"ONNX model not found at {self.model_path}")
+                return False
             return True
         except Exception as e:
-            logger.error(f"Error loading YOLO model: {e}")
+            logger.error(f"Error loading ONNX YOLO model: {e}")
             return False
     
     def predict(self, image: Any, conf: Optional[float] = None, iou: float = 0.45,
                 max_det: int = 50, fast_mode: bool = False) -> List[Dict]:
         """
-        Detect license plates in image
-        
-        Args:
-            image: Input image
-            conf: Confidence threshold (uses default if None)
-            iou: IoU threshold for non-max suppression
-            max_det: Maximum number of detections to return
-            fast_mode: If True, use smaller imgsz (640) for much faster inference
-            
-        Returns:
-            List of detections with bounding boxes and confidence
+        Detect license plates in image using ONNX Runtime
         """
-        if self.model is None:
-            logger.error("Model not loaded")
+        if self.session is None:
+            logger.error("ONNX Model not loaded")
             return []
         
         try:
             confidence = conf or self.confidence
-            # Use 640 for real-time/fast-mode (≈3× faster than 960+).
-            # Use 960 for high-quality single-image uploads only.
-            if fast_mode:
-                imgsz = 640
+            
+            # 1. Letterbox resizing to 640x640 (required for this specific exported model)
+            import cv2
+            import numpy as np
+            
+            shape = image.shape[:2]
+            new_shape = (640, 640)
+            r = min(new_shape[0] / shape[0], new_shape[1] / shape[1])
+            new_unpad = int(round(shape[1] * r)), int(round(shape[0] * r))
+            dw, dh = new_shape[1] - new_unpad[0], new_shape[0] - new_unpad[1]
+            dw /= 2
+            dh /= 2
+            
+            if shape[::-1] != new_unpad:
+                im = cv2.resize(image, new_unpad, interpolation=cv2.INTER_LINEAR)
             else:
-                image_height, image_width = image.shape[:2]
-                max_side = max(image_height, image_width)
-                imgsz = min(640, max(640, ((max_side + 31) // 32) * 32))
+                im = image.copy()
+            top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
+            left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
+            im = cv2.copyMakeBorder(im, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(114, 114, 114))
 
-            results = self.model(
-                image,
-                conf=confidence,
-                iou=iou,
-                max_det=max_det,
-                imgsz=imgsz,
-                device=self.device,
-                verbose=False,
-            )
+            # 2. Convert HWC to CHW, BGR to RGB
+            im = im.transpose((2, 0, 1))[::-1]  
+            im = np.ascontiguousarray(im)
+            im = im.astype(np.float32) / 255.0
+            im = np.expand_dims(im, axis=0)
+
+            # 3. ONNX Inference
+            input_name = self.session.get_inputs()[0].name
+            outputs = self.session.run(None, {input_name: im})
+            preds = outputs[0][0] # YOLOv10 output is (1, 300, 6)
             
+            # 4. Parse outputs and scale bounding boxes back
             detections = []
-            for result in results:
-                for box in result.boxes:
-                    detection = {
-                        'bbox': box.xyxy[0].cpu().numpy().astype(int),
-                        'confidence': float(box.conf[0].cpu()),
-                        'class_id': int(box.cls[0].cpu())
-                    }
-                    detections.append(detection)
+            for pred in preds:
+                box_conf = float(pred[4])
+                if box_conf < confidence:
+                    continue
+                
+                # Scale boxes back
+                x1, y1, x2, y2 = pred[:4]
+                x1 = (x1 - dw) / r
+                x2 = (x2 - dw) / r
+                y1 = (y1 - dh) / r
+                y2 = (y2 - dh) / r
+                
+                # Clip to image boundaries
+                x1 = max(0, min(shape[1], x1))
+                x2 = max(0, min(shape[1], x2))
+                y1 = max(0, min(shape[0], y1))
+                y2 = max(0, min(shape[0], y2))
+
+                detections.append({
+                    'bbox': [int(x1), int(y1), int(x2), int(y2)],
+                    'confidence': box_conf,
+                    'class_id': int(pred[5])
+                })
             
-            logger.debug(f"Detected {len(detections)} license plates (imgsz={imgsz})")
+            # Sort by confidence descending and limit to max_det
+            detections.sort(key=lambda x: x['confidence'], reverse=True)
+            detections = detections[:max_det]
+            
+            logger.debug(f"Detected {len(detections)} license plates (ONNX)")
             return detections
         except Exception as e:
-            logger.error(f"Error during detection: {e}")
+            logger.error(f"Error during ONNX detection: {e}")
             return []
 
 
@@ -391,9 +205,9 @@ class OCREngine(ModelLoader):
     def load(self) -> bool:
         """Load OCR model"""
         try:
-            import easyocr
-            self.reader = easyocr.Reader([self.language], gpu=self.use_gpu)
-            logger.info(f"EasyOCR loaded for language: {self.language}")
+            import pytesseract
+            self.reader = pytesseract
+            logger.info("Tesseract OCR initialized")
             return True
         except Exception as e:
             logger.error(f"Error loading OCR model: {e}")
@@ -415,17 +229,26 @@ class OCREngine(ModelLoader):
             return ""
         
         try:
-            results = self.reader.readtext(image, allowlist=self.allowed_chars, detail=int(detail))
+            import pytesseract
+            from pytesseract import Output
             
-            if not results:
-                return ""
+            # Configure Tesseract to look for a single line of text and restrict characters
+            custom_config = f'-c tessedit_char_whitelist={self.allowed_chars} --psm 7'
             
             if detail:
+                data = pytesseract.image_to_data(image, output_type=Output.DICT, config=custom_config)
+                results = []
+                for i in range(len(data['text'])):
+                    conf = float(data['conf'][i])
+                    text = data['text'][i].strip()
+                    if conf > 0 and text:
+                        x, y, w, h = data['left'][i], data['top'][i], data['width'][i], data['height'][i]
+                        bbox = [[x, y], [x+w, y], [x+w, y+h], [x, y+h]]
+                        results.append((bbox, text, conf / 100.0))
                 return results
-            
-            # Concatenate all recognized text
-            text = ''.join([result[1] for result in results])
-            return text.upper()
+            else:
+                text = pytesseract.image_to_string(image, config=custom_config).strip()
+                return text.upper()
         except Exception as e:
             logger.error(f"Error during OCR: {e}")
             return ""

@@ -10,14 +10,9 @@ Pillow==10.0.1
 scipy==1.11.3
 matplotlib==3.7.2
 
-# Deep Learning
---extra-index-url https://download.pytorch.org/whl/cpu
-torch==2.0.1
-torchvision==0.15.2
-ultralytics==8.0.196
-
-# OCR
-easyocr==1.7.0
+# Deep Learning & OCR
+pytesseract==0.3.10
+onnxruntime==1.23.2
 
 # Database
 sqlalchemy==2.0.20
